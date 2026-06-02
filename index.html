@@ -222,13 +222,37 @@
             }
 
             async function createPeerConnection(peerId) {
-                if (peers.get(peerId)?.pc) return peers.get(peerId).pc;
+                if (peers.get(peerId)?.pc) {
+                    return peers.get(peerId).pc;
+                }
+
+                let peer = peers.get(peerId);
+                if (!peer) {
+                    peer = {
+                        name: "Unknown",
+                        color: "#ccc",
+                        position: { x: 100, y: 100 },
+                        dc: null,
+                        pc: null,
+                    };
+
+                    peers.set(peerId, peer);
+
+                    addLog(`⚠️ Auto-created peer ${peerId}`);
+                }
 
                 const pc = new RTCPeerConnection(config);
+                peer.pc = pc;
+                pc.onconnectionstatechange = () => {
+                    addLog(`STATE ${peerId}: ${pc.connectionState}`);
+                };
+
+                pc.oniceconnectionstatechange = () => {
+                    addLog(`ICE ${peerId}: ${pc.iceConnectionState}`);
+                };
 
                 // DataChannel local (para enviar)
                 const dc = pc.createDataChannel("chat");
-                const peer = peers.get(peerId);
                 peer.dc = dc;
                 peer.pc = pc;
 
