@@ -107,7 +107,7 @@
     </head>
     <body>
         <div class="card">
-            <h3>🎮 P2P Simple</h3>
+            <h3>P2P Simple</h3>
             <div>
                 <input type="text" id="room" placeholder="Sala" value="demo" />
                 <input type="text" id="name" placeholder="Seu nome" value="User" />
@@ -123,27 +123,13 @@
         </div>
 
         <div class="card">
-            <h4>🎨 Cor</h4>
-            <div id="colorPicker"></div>
-        </div>
-
-        <div class="card">
-            <h4>📍 Clique no canvas para mover</h4>
-            <canvas id="canvas" width="500" height="300"></canvas>
-        </div>
-
-        <div class="card">
             <h4>📨 Mensagens</h4>
             <button id="sendMsgBtn">Enviar "Olá P2P!"</button>
             <div class="log" id="log"></div>
         </div>
 
+        <script src="p2p.js"></script>
         <script>
-            // Configuração WebRTC
-            const config = {
-                iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-            };
-
             // Elementos DOM
             const roomInput = document.getElementById("room");
             const nameInput = document.getElementById("name");
@@ -152,19 +138,12 @@
             const statusDiv = document.getElementById("status");
             const peersListDiv = document.getElementById("peersList");
             const logDiv = document.getElementById("log");
-            const canvas = document.getElementById("canvas");
-            const ctx = canvas.getContext("2d");
             const sendMsgBtn = document.getElementById("sendMsgBtn");
 
-            // Estado
-            let ws = null;
-            let myId = null;
-            let myName = "";
-            let myColor = "#FF6B6B";
-            let myPosition = { x: 250, y: 150 };
+            let network = null;
+            let uiRefreshInterval = null;
 
-            let peers = new Map(); // id -> { name, color, position, dc, pc }
-
+            // Funções de Auxílio da UI
             function addLog(msg, type = "info") {
                 const entry = document.createElement("div");
                 entry.className = "log-entry";
@@ -178,211 +157,25 @@
                 statusDiv.className = `status ${state}`;
             }
 
-            function updatePeersList() {
-                if (peers.size === 0) {
+            function renderPeers() {
+                if (!network || network.peers.size === 0) {
                     peersListDiv.innerHTML = "Nenhum participante";
                     return;
                 }
 
                 let html = "";
-                for (const [id, p] of peers.entries()) {
-                    const connected = p.dc?.readyState === "open";
-                    html += `<div class="peer ${connected ? "online" : ""}">
-                    🟢 ${p.name}
+                for (const [id, peer] of network.peers.entries()) {
+                    const isOnline = peer.dc?.readyState === "open";
+                    html += `<div class="peer ${isOnline ? "online" : ""}">
+                    🟢 ${peer.name}
                     <span style="font-size:10px;">${id.substring(0, 6)}</span>
                 </div>`;
                 }
                 peersListDiv.innerHTML = html;
             }
 
-            function draw() {
-                ctx.fillStyle = "#f8f9fa";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                // Meu ponto
-                ctx.beginPath();
-                ctx.arc(myPosition.x, myPosition.y, 15, 0, 2 * Math.PI);
-                ctx.fillStyle = myColor;
-                ctx.fill();
-                ctx.fillStyle = "black";
-                ctx.font = "12px Arial";
-                ctx.fillText("Você", myPosition.x - 18, myPosition.y - 10);
-
-                // Peers
-                for (const [id, p] of peers.entries()) {
-                    if (p.position) {
-                        ctx.beginPath();
-                        ctx.arc(p.position.x, p.position.y, 15, 0, 2 * Math.PI);
-                        ctx.fillStyle = p.color || "#ccc";
-                        ctx.fill();
-                        ctx.fillStyle = "black";
-                        ctx.fillText(p.name, p.position.x - 18, p.position.y - 10);
-                    }
-                }
-            }
-
-            async function createPeerConnection(peerId) {
-                if (peers.get(peerId)?.pc) {
-                    return peers.get(peerId).pc;
-                }
-
-                let peer = peers.get(peerId);
-                if (!peer) {
-                    peer = {
-                        name: "Unknown",
-                        color: "#ccc",
-                        position: { x: 100, y: 100 },
-                        dc: null,
-                        pc: null,
-                    };
-
-                    peers.set(peerId, peer);
-
-                    addLog(`⚠️ Auto-created peer ${peerId}`);
-                }
-
-                const pc = new RTCPeerConnection(config);
-                peer.pc = pc;
-                pc.onconnectionstatechange = () => {
-                    addLog(`STATE ${peerId}: ${pc.connectionState}`);
-                };
-
-                pc.oniceconnectionstatechange = () => {
-                    addLog(`ICE ${peerId}: ${pc.iceConnectionState}`);
-                };
-
-                // DataChannel local (para enviar)
-                const dc = pc.createDataChannel("chat");
-                peer.dc = dc;
-                peer.pc = pc;
-
-                dc.onopen = () => {
-                    addLog(`✅ Canal aberto com ${peer.name}`, "success");
-                    updatePeersList();
-                    // Enviar estado inicial
-                    dc.send(JSON.stringify({ type: "state", name: myName, color: myColor, position: myPosition }));
-                };
-
-                dc.onclose = () => {
-                    addLog(`❌ Canal fechado com ${peer.name}`);
-                    updatePeersList();
-                };
-
-                dc.onmessage = (e) => {
-                    const data = JSON.parse(e.data);
-                    if (data.type === "state") {
-                        peer.name = data.name;
-                        peer.color = data.color;
-                        peer.position = data.position;
-                        draw();
-                        updatePeersList();
-                    } else if (data.type === "position") {
-                        peer.position = data.position;
-                        draw();
-                    } else if (data.type === "color") {
-                        peer.color = data.color;
-                        updatePeersList();
-                        draw();
-                    } else if (data.type === "message") {
-                        addLog(`💬 ${peer.name}: ${data.text}`, "info");
-                    }
-                };
-
-                // DataChannel remoto (para receber)
-                pc.ondatachannel = (event) => {
-                    addLog(`📡 DataChannel recebido de ${peer.name}`);
-                    peer.dc = event.channel;
-                    setupDataChannel(peerId, peer.dc);
-                };
-
-                pc.onicecandidate = (e) => {
-                    if (e.candidate && ws?.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: "ice-candidate", to: peerId, candidate: e.candidate }));
-                    }
-                };
-
-                return pc;
-            }
-
-            function setupDataChannel(peerId, dc) {
-                const peer = peers.get(peerId);
-                peer.dc = dc;
-
-                dc.onopen = () => {
-                    addLog(`✅ Canal aberto com ${peer.name}`, "success");
-                    updatePeersList();
-                    dc.send(JSON.stringify({ type: "state", name: myName, color: myColor, position: myPosition }));
-                };
-
-                dc.onclose = () => {
-                    addLog(`❌ Canal fechado com ${peer.name}`);
-                    updatePeersList();
-                };
-
-                dc.onmessage = (e) => {
-                    const data = JSON.parse(e.data);
-                    if (data.type === "state") {
-                        peer.name = data.name;
-                        peer.color = data.color;
-                        peer.position = data.position;
-                        draw();
-                        updatePeersList();
-                    } else if (data.type === "position") {
-                        peer.position = data.position;
-                        draw();
-                    } else if (data.type === "color") {
-                        peer.color = data.color;
-                        updatePeersList();
-                        draw();
-                    } else if (data.type === "message") {
-                        addLog(`💬 ${peer.name}: ${data.text}`, "info");
-                    }
-                };
-            }
-
-            async function initiateConnection(peerId) {
-                const peer = peers.get(peerId);
-                if (!peer) return;
-
-                addLog(`📞 Conectando com ${peer.name}...`);
-                const pc = await createPeerConnection(peerId);
-
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                ws.send(JSON.stringify({ type: "offer", to: peerId, sdp: offer }));
-            }
-
-            async function handleOffer(peerId, offer) {
-                const pc = await createPeerConnection(peerId);
-                await pc.setRemoteDescription(new RTCSessionDescription(offer));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                ws.send(JSON.stringify({ type: "answer", to: peerId, sdp: answer }));
-            }
-
-            async function handleAnswer(peerId, answer) {
-                const peer = peers.get(peerId);
-                if (peer?.pc) {
-                    await peer.pc.setRemoteDescription(new RTCSessionDescription(answer));
-                }
-            }
-
-            async function handleIceCandidate(peerId, candidate) {
-                const peer = peers.get(peerId);
-                if (peer?.pc) {
-                    await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
-                }
-            }
-
-            function broadcastToAll(data) {
-                for (const [id, peer] of peers.entries()) {
-                    if (peer.dc?.readyState === "open") {
-                        peer.dc.send(JSON.stringify(data));
-                    }
-                }
-            }
-
-            function connect() {
+            // Inicialização e Eventos de Input
+            connectBtn.onclick = () => {
                 const room = roomInput.value.trim();
                 const name = nameInput.value.trim();
 
@@ -391,124 +184,68 @@
                     return;
                 }
 
-                myName = name;
                 updateStatus("Conectando...", "connecting");
-
-                ws = new WebSocket(`wss://p2p-signaling.charlesneimog.workers.dev?room=${room}`);
-
-                ws.onopen = () => {
-                    addLog(`✅ Conectado à sala: ${room}`, "success");
-                    updateStatus(`Conectado`, "connected");
+                network = new SimpleP2P(room, name);
+                //network.onLog = (msg) => addLog(msg, "info");
+                network.onError = (msg) => addLog(`❌ ${msg}`, "error");
+                network.onConnect = (myId) => {
+                    updateStatus("Conectado", "connected");
                     connectBtn.disabled = true;
                     disconnectBtn.disabled = false;
-                    ws.send(JSON.stringify({ type: "join", name: myName }));
+                    addLog(`✅ Conectado ao servidor de sinalização. ID: ${myId.substring(0, 8)}`, "success");
+                    renderPeers();
+                    uiRefreshInterval = setInterval(() => {
+                        if (network && network.peers.size > 0) renderPeers();
+                    }, 1000);
                 };
 
-                ws.onmessage = async (e) => {
-                    const msg = JSON.parse(e.data);
-                    addLog(`📨 ${msg.type}`, "info");
+                network.onDisconnect = () => {
+                    updateStatus("Desconectado", "disconnected");
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    if (uiRefreshInterval) clearInterval(uiRefreshInterval);
+                    renderPeers();
+                    addLog("🔌 Desconectado", "error");
+                    network = null;
+                };
 
-                    switch (msg.type) {
-                        case "welcome":
-                            myId = msg.id;
-                            addLog(`🎉 Seu ID: ${myId.substring(0, 8)}`, "success");
-                            break;
-                        case "peer-joined":
-                            addLog(`👋 ${msg.peer.name} entrou`);
-                            if (!peers.has(msg.from)) {
-                                peers.set(msg.from, {
-                                    name: msg.peer.name,
-                                    color: "#ccc",
-                                    position: { x: 100, y: 100 },
-                                });
-                                updatePeersList();
-                                draw();
-                                await initiateConnection(msg.from);
-                            }
-                            break;
-                        case "peer-left":
-                            addLog(`👋 ${peers.get(msg.from)?.name || "Alguém"} saiu`);
-                            const peer = peers.get(msg.from);
-                            if (peer) {
-                                peer.dc?.close();
-                                peer.pc?.close();
-                                peers.delete(msg.from);
-                                updatePeersList();
-                                draw();
-                            }
-                            break;
-                        case "offer":
-                            await handleOffer(msg.from, msg.sdp);
-                            break;
-                        case "answer":
-                            await handleAnswer(msg.from, msg.sdp);
-                            break;
-                        case "ice-candidate":
-                            await handleIceCandidate(msg.from, msg.candidate);
-                            break;
+                network.onPeerJoin = (peerId, peerName) => {
+                    addLog(`👋 ${peerName} entrou na sala`);
+                    renderPeers();
+                };
+
+                network.onPeerLeave = (peerId) => {
+                    addLog(`👋 Um usuário saiu`);
+                    renderPeers();
+                };
+
+                // Roteamento de mensagens recebidas
+                network.onMessage = (peerId, data) => {
+                    const peer = network.peers.get(peerId);
+                    const peerName = peer ? peer.name : "Desconhecido";
+                    if (data.type === "message") {
+                        addLog(`💬 ${peerName}: ${data.text}`, "success");
+                    } else {
+                        addLog(`📦 Dados recebidos de ${peerName}: ${JSON.stringify(data)}`);
                     }
                 };
 
-                ws.onerror = () => addLog("❌ Erro WebSocket", "error");
-                ws.onclose = () => disconnect();
-            }
-
-            function disconnect() {
-                ws?.close();
-                for (const [id, peer] of peers.entries()) {
-                    peer.dc?.close();
-                    peer.pc?.close();
-                }
-                peers.clear();
-                myId = null;
-                updateStatus("Desconectado", "disconnected");
-                connectBtn.disabled = false;
-                disconnectBtn.disabled = true;
-                updatePeersList();
-                draw();
-                addLog("🔌 Desconectado", "error");
-            }
-
-            // Eventos
-            canvas.addEventListener("click", (e) => {
-                const rect = canvas.getBoundingClientRect();
-                const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-                const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-                myPosition = {
-                    x: Math.max(10, Math.min(canvas.width - 10, x)),
-                    y: Math.max(10, Math.min(canvas.height - 10, y)),
-                };
-                draw();
-                broadcastToAll({ type: "position", position: myPosition });
-            });
-
-            sendMsgBtn.onclick = () => {
-                broadcastToAll({ type: "message", text: "Olá P2P!" });
-                addLog("💬 Você: Olá P2P!", "info");
+                // Inicia a rotina de conexão
+                network.connect();
             };
 
-            connectBtn.onclick = connect;
-            disconnectBtn.onclick = disconnect;
+            disconnectBtn.onclick = () => {
+                if (network) network.disconnect();
+            };
 
-            // Color picker
-            const colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD"];
-            const colorDiv = document.getElementById("colorPicker");
-            colors.forEach((color) => {
-                const btn = document.createElement("div");
-                btn.className = "color-btn";
-                btn.style.background = color;
-                btn.onclick = () => {
-                    document.querySelectorAll(".color-btn").forEach((c) => c.classList.remove("selected"));
-                    btn.classList.add("selected");
-                    myColor = color;
-                    broadcastToAll({ type: "color", color: myColor });
-                    draw();
-                };
-                colorDiv.appendChild(btn);
-            });
-            colorDiv.children[0]?.classList.add("selected");
+            sendMsgBtn.onclick = () => {
+                if (!network) return;
 
-            draw();
+                const payload = { type: "message", text: "Olá P2P!" };
+                network.broadcast(payload);
+
+                addLog(`💬 Você: ${payload.text}`, "info");
+            };
         </script>
     </body>
 </html>
