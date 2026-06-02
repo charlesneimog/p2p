@@ -168,7 +168,6 @@
                     const isOnline = peer.dc?.readyState === "open";
                     html += `<div class="peer ${isOnline ? "online" : ""}">
                     🟢 ${peer.name}
-                    <span style="font-size:10px;">${id.substring(0, 6)}</span>
                 </div>`;
                 }
                 peersListDiv.innerHTML = html;
