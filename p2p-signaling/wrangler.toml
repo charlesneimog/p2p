@@ -1,5 +1,11 @@
-name = "p2p"
+name = "p2p-signaling"
 main = "src/index.js"
-compatibility_date = "2026-04-07"
+compatibility_date = "2026-06-02"
 
-# Sem Durable Objects por enquanto - vamos testar WebSocket puro primeiro
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
