@@ -370,7 +370,7 @@
                 myName = name;
                 updateStatus("Conectando...", "connecting");
 
-                ws = new WebSocket(`wss://p2p.charlesneimog.workers.dev?room=${room}`);
+                ws = new WebSocket(`wss://p2p-signaling.charlesneimog.workers.dev?room=${room}`);
 
                 ws.onopen = () => {
                     addLog(`✅ Conectado à sala: ${room}`, "success");
