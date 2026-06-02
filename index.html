@@ -83,26 +83,6 @@
                 padding: 2px 0;
                 border-bottom: 1px solid #333;
             }
-            canvas {
-                width: 100%;
-                height: 300px;
-                background: white;
-                border: 1px solid #ddd;
-                cursor: crosshair;
-            }
-            .color-btn {
-                width: 40px;
-                height: 40px;
-                border-radius: 50%;
-                margin: 4px;
-                cursor: pointer;
-                border: 2px solid transparent;
-                display: inline-block;
-            }
-            .color-btn.selected {
-                border-color: #333;
-                transform: scale(1.1);
-            }
         </style>
     </head>
     <body>
@@ -118,14 +98,19 @@
         </div>
 
         <div class="card">
-            <h4>👥 Participantes</h4>
+            <h4>Participantes</h4>
             <div id="peersList">Nenhum</div>
         </div>
 
         <div class="card">
-            <h4>📨 Mensagens</h4>
-            <button id="sendMsgBtn">Enviar "Olá P2P!"</button>
+            <h4>Mensagens</h4>
+            <button id="sendMsgBtn">Enviar "Ola P2P!"</button>
             <div class="log" id="log"></div>
+        </div>
+
+        <div class="card">
+            <h4>Audio</h4>
+            <button id="initAudioBtn">Init Mic</button>
         </div>
 
         <script src="p2p.js"></script>
@@ -139,11 +124,12 @@
             const peersListDiv = document.getElementById("peersList");
             const logDiv = document.getElementById("log");
             const sendMsgBtn = document.getElementById("sendMsgBtn");
+            const initAudioBtn = document.getElementById("initAudioBtn");
 
             let network = null;
             let uiRefreshInterval = null;
 
-            // Funções de Auxílio da UI
+            // Funcoes de Auxilio da UI
             function addLog(msg, type = "info") {
                 const entry = document.createElement("div");
                 entry.className = "log-entry";
@@ -167,31 +153,32 @@
                 for (const [id, peer] of network.peers.entries()) {
                     const isOnline = peer.dc?.readyState === "open";
                     html += `<div class="peer ${isOnline ? "online" : ""}">
-                    🟢 ${peer.name}
+                    * ${peer.name}
                 </div>`;
                 }
                 peersListDiv.innerHTML = html;
             }
 
-            // Inicialização e Eventos de Input
+            // Inicializacao e Eventos de Input
             connectBtn.onclick = () => {
                 const room = roomInput.value.trim();
                 const name = nameInput.value.trim();
-
                 if (!room || !name) {
-                    addLog("❌ Preencha sala e nome", "error");
+                    addLog("[Erro] Preencha sala e nome", "error");
                     return;
                 }
 
                 updateStatus("Conectando...", "connecting");
                 network = new SimpleP2P(room, name);
-                //network.onLog = (msg) => addLog(msg, "info");
-                network.onError = (msg) => addLog(`❌ ${msg}`, "error");
+
+                network.onLog = (msg) => console.log(msg);
+                network.onError = (msg) => addLog(`[Erro] ${msg}`, "error");
+
                 network.onConnect = (myId) => {
                     updateStatus("Conectado", "connected");
                     connectBtn.disabled = true;
                     disconnectBtn.disabled = false;
-                    addLog(`✅ Conectado ao servidor de sinalização. ID: ${myId.substring(0, 8)}`, "success");
+                    addLog(`[Sucesso] Conectado ao servidor de sinalizacao. ID: ${myId.substring(0, 8)}`, "success");
                     renderPeers();
                     uiRefreshInterval = setInterval(() => {
                         if (network && network.peers.size > 0) renderPeers();
@@ -202,34 +189,55 @@
                     updateStatus("Desconectado", "disconnected");
                     connectBtn.disabled = false;
                     disconnectBtn.disabled = true;
+                    initAudioBtn.disabled = false;
                     if (uiRefreshInterval) clearInterval(uiRefreshInterval);
                     renderPeers();
-                    addLog("🔌 Desconectado", "error");
+                    addLog("[Info] Desconectado", "error");
                     network = null;
                 };
 
                 network.onPeerJoin = (peerId, peerName) => {
-                    addLog(`👋 ${peerName} entrou na sala`);
+                    addLog(`[Info] ${peerName} entrou na sala`);
                     renderPeers();
                 };
 
                 network.onPeerLeave = (peerId) => {
-                    addLog(`👋 Um usuário saiu`);
+                    const audioElement = document.getElementById(`audio-${peerId}`);
+                    if (audioElement) {
+                        audioElement.pause();
+                        audioElement.srcObject = null;
+                        audioElement.remove();
+                    }
+                    addLog(`[Info] Um usuario saiu`);
                     renderPeers();
                 };
 
-                // Roteamento de mensagens recebidas
                 network.onMessage = (peerId, data) => {
                     const peer = network.peers.get(peerId);
                     const peerName = peer ? peer.name : "Desconhecido";
                     if (data.type === "message") {
-                        addLog(`💬 ${peerName}: ${data.text}`, "success");
+                        addLog(`[Msg] ${peerName}: ${data.text}`, "success");
                     } else {
-                        addLog(`📦 Dados recebidos de ${peerName}: ${JSON.stringify(data)}`);
+                        addLog(`[Dados] Dados recebidos de ${peerName}: ${JSON.stringify(data)}`);
                     }
                 };
 
-                // Inicia a rotina de conexão
+                network.onTrack = (peerId, remoteStream) => {
+                    const peer = network.peers.get(peerId);
+                    const peerName = peer ? peer.name : "Alguem";
+
+                    addLog(`[Audio] Recebendo audio de: ${peerName}`, "success");
+
+                    let audioElement = document.getElementById(`audio-${peerId}`);
+                    if (!audioElement) {
+                        audioElement = document.createElement("audio");
+                        audioElement.id = `audio-${peerId}`;
+                        audioElement.autoplay = true;
+                        document.body.appendChild(audioElement);
+                    }
+                    audioElement.srcObject = remoteStream;
+                };
+
                 network.connect();
             };
 
@@ -239,11 +247,33 @@
 
             sendMsgBtn.onclick = () => {
                 if (!network) return;
-
-                const payload = { type: "message", text: "Olá P2P!" };
+                const payload = { type: "message", text: "Ola P2P!" };
                 network.broadcast(payload);
+                addLog(`[Msg] Voce: ${payload.text}`, "info");
+            };
 
-                addLog(`💬 Você: ${payload.text}`, "info");
+            initAudioBtn.onclick = async () => {
+                if (!network) {
+                    addLog("[Erro] Conecte-se a uma sala primeiro para transmitir audio.", "error");
+                    return;
+                }
+
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false,
+                        },
+                        video: false,
+                    });
+
+                    network.addMediaStream(stream);
+                    addLog("[Sucesso] Microfone ativado e adicionado a rede", "success");
+                    initAudioBtn.disabled = true;
+                } catch (err) {
+                    addLog(`[Erro] Erro ao acessar microfone: ${err.message}`, "error");
+                }
             };
         </script>
     </body>

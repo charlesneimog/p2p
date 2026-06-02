@@ -1,13 +1,14 @@
 class SimpleP2P {
-    // 1. Added serverUrl with a default fallback
     constructor(room, name, serverUrl = "wss://p2p-signaling.charlesneimog.workers.dev") {
         this.room = room;
         this.name = name;
-        this.serverUrl = serverUrl; // Store the URL
+        this.serverUrl = serverUrl;
 
         this.myId = null;
         this.ws = null;
         this.peers = new Map(); // id -> { name, pc, dc }
+
+        this.localStream = null; // Guarda o stream de áudio/vídeo local
 
         this.config = {
             iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -19,8 +20,28 @@ class SimpleP2P {
         this.onPeerJoin = (peerId, peerName) => {};
         this.onPeerLeave = (peerId) => {};
         this.onMessage = (peerId, data) => {};
+        this.onTrack = (peerId, remoteStream) => {}; // NOVO: Hook para receber áudio/vídeo
         this.onError = (errorMsg) => {};
         this.onLog = (msg) => {};
+    }
+
+    // --- NOVO: Método para injetar o áudio ---
+    addMediaStream(stream) {
+        this.localStream = stream;
+
+        // Se já existirem conexões ativas, adiciona as faixas a elas
+        for (const [id, peer] of this.peers.entries()) {
+            if (peer.pc) {
+                const senders = peer.pc.getSenders();
+                stream.getTracks().forEach((track) => {
+                    // Evita adicionar a mesma faixa duas vezes
+                    const alreadyAdded = senders.find((s) => s.track === track);
+                    if (!alreadyAdded) {
+                        peer.pc.addTrack(track, stream);
+                    }
+                });
+            }
+        }
     }
 
     connect() {
@@ -31,7 +52,6 @@ class SimpleP2P {
 
         this.onLog(`Connecting to signaling server for room: ${this.room}`);
 
-        // 2. Build the URL dynamically based on the constructor parameter
         const wsUrl = `${this.serverUrl}?room=${this.room}`;
         this.ws = new WebSocket(wsUrl);
 
@@ -42,7 +62,6 @@ class SimpleP2P {
 
         this.ws.onmessage = async (e) => {
             const msg = JSON.parse(e.data);
-            this.onLog(`Signaling message received: ${msg.type}`);
 
             switch (msg.type) {
                 case "welcome":
@@ -104,6 +123,7 @@ class SimpleP2P {
         }
         this.peers.clear();
         this.myId = null;
+        this.localStream = null;
         this.onDisconnect();
     }
 
@@ -165,13 +185,42 @@ class SimpleP2P {
         const pc = new RTCPeerConnection(this.config);
         peer.pc = pc;
 
+        // 1. Conexão de Dados (DataChannel)
         if (isCaller) {
             const dc = pc.createDataChannel("data");
             this._setupDataChannel(peerId, dc);
         }
+        pc.ondatachannel = (event) => this._setupDataChannel(peerId, event.channel);
 
-        pc.ondatachannel = (event) => {
-            this._setupDataChannel(peerId, event.channel);
+        // 2. Transmissão de Mídia (Local -> Remoto)
+        if (this.localStream) {
+            this.localStream.getTracks().forEach((track) => {
+                pc.addTrack(track, this.localStream);
+            });
+        }
+
+        // 3. Recepção de Mídia (Remoto -> Local)
+        pc.ontrack = (event) => {
+            this.onLog(`Recebendo stream de áudio/vídeo de ${peer.name}`);
+            if (event.streams && event.streams[0]) {
+                this.onTrack(peerId, event.streams[0]);
+            } else {
+                const inboundStream = new MediaStream([event.track]);
+                this.onTrack(peerId, inboundStream);
+            }
+        };
+
+        // 4. Tratamento Dinâmico (Renegociação se adicionar áudio no meio da chamada)
+        pc.onnegotiationneeded = async () => {
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                if (this.ws?.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({ type: "offer", to: peerId, sdp: pc.localDescription }));
+                }
+            } catch (err) {
+                this.onError(`Renegotiation failed: ${err}`);
+            }
         };
 
         pc.onicecandidate = (e) => {
@@ -186,9 +235,6 @@ class SimpleP2P {
     _setupDataChannel(peerId, dc) {
         const peer = this.peers.get(peerId);
         peer.dc = dc;
-
-        dc.onopen = () => this.onLog(`DataChannel open with ${peer.name}`);
-        dc.onclose = () => this.onLog(`DataChannel closed with ${peer.name}`);
 
         dc.onmessage = (e) => {
             try {
