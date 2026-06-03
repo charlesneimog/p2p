@@ -1,3 +1,4 @@
 /.wrangler/cache
 /p2p-signaling/node_modules
 /.build
+/compile_commands.json

@@ -1,6 +1,7 @@
 #include <m_pd.h>
 #include <string.h>
 #include <stdlib.h>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <atomic>
@@ -170,11 +171,9 @@ static void setup_webrtc(p2p_tilde *x, bool is_caller) {
         }
     });
 
-    // Create audio track
-    rtc::Description::Direction direction =
-        is_caller ? rtc::Description::Direction::SendRecv : rtc::Description::Direction::RecvOnly;
-
-    rtc::Description::Audio audio("audio", direction);
+    // FIX Bug 1: Both sides must be SendRecv so audio flows in both directions.
+    // RecvOnly on the callee means it never sends, making it a one-way call.
+    rtc::Description::Audio audio("audio", rtc::Description::Direction::SendRecv);
     audio.addOpusCodec(111);
     audio.setBitrate(64000);
     node->audio_track = node->pc->addTrack(audio);
@@ -185,24 +184,29 @@ static void setup_webrtc(p2p_tilde *x, bool is_caller) {
 
     logpost(x, PD_NORMAL, "[p2p~] Audio track added");
 
-    // Setup RTP packetizer for sending
+    // FIX Bug 3+4: Do NOT attach OpusRtpPacketizer as a media handler.
+    // The tx thread already encodes raw PCM to Opus manually and calls
+    // audio_track->send() with the resulting bytes. Using setMediaHandler with
+    // OpusRtpPacketizer would cause double-encoding AND expects sendFrame() not send().
+    // Instead we build the minimal RTP header ourselves in the tx thread (see below).
+    // The send track only needs the RTCP SR reporter to keep RTCP timing correct.
     auto rtpConfig =
         std::make_shared<rtc::RtpPacketizationConfig>(12345, "audio-send", 111, node->sample_rate);
-    node->audio_track->setMediaHandler(std::make_shared<rtc::OpusRtpPacketizer>(rtpConfig));
-    node->audio_track->chainMediaHandler(std::make_shared<rtc::RtcpSrReporter>(rtpConfig));
+    node->audio_track->setMediaHandler(std::make_shared<rtc::RtcpSrReporter>(rtpConfig));
 
-    // Handle incoming audio
+    // FIX Bug 3: onTrack fires for the REMOTE track (the one we receive on).
+    // Attach the depacketizer there, not on the local send track.
     node->pc->onTrack([x, node](std::shared_ptr<rtc::Track> track) {
         if (track->description().type() != "audio") {
             return;
         }
 
         logpost(x, PD_NORMAL, "[p2p~] Receiving audio");
+        // Attach depacketizer + RTCP receiving session to the inbound track
         track->setMediaHandler(std::make_shared<rtc::OpusRtpDepacketizer>());
         track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
 
         track->onFrame([x, node](rtc::binary data, rtc::FrameInfo) {
-            post("new frame");
             if (!node->opus_dec) {
                 return;
             }
@@ -290,7 +294,9 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
 
         if (type == "peer-joined") {
             x->node->remote_peer_id = data["from"];
-            x->node->is_polite = false; // First peer is impolite
+            // FIX Bug 5: The peer who receives peer-joined is the CALLER (impolite).
+            // The impolite peer ignores colliding offers; the polite peer defers.
+            x->node->is_polite = false; // caller = impolite
             setup_webrtc(x, true);
             x->peer_connected = x->peer_connected + 1;
             clock_delay(x->report_clock, 0);
@@ -298,16 +304,26 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
             x->node->pc->setLocalDescription();
         } else if (type == "offer") {
             x->node->remote_peer_id = data["from"];
-            x->node->is_polite = true;
+            // FIX Bug 5: The peer who receives an offer first is the ANSWERER (polite).
+            x->node->is_polite = true; // answerer = polite
             if (!x->node->pc) {
                 setup_webrtc(x, false);
             }
 
-            if (x->node->making_offer) {
-                logpost(x, PD_DEBUG, "[p2p~] Glare detected, ignoring offer (polite)");
+            // FIX Bug 5: Glare resolution uses Perfect Negotiation rules:
+            //   - Impolite peer (is_polite=false) IGNORES the incoming offer when
+            //     it is already making one, so its own offer wins.
+            //   - Polite peer (is_polite=true) ACCEPTS the incoming offer even if
+            //     it was also making one; it rolls back its own pending offer.
+            // The old code ignored the offer when is_polite==true, which is backwards.
+            if (x->node->making_offer && !x->node->is_polite) {
+                logpost(x, PD_DEBUG, "[p2p~] Glare detected, ignoring offer (impolite peer wins)");
                 x->node->ignore_offer = true;
                 return;
             }
+            // If we are polite and were making an offer, reset so we handle this offer cleanly.
+            x->node->making_offer = false;
+            x->node->ignore_offer = false;
 
             // Extract SDP
             std::string sdp_str;
@@ -337,9 +353,9 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
             }
 
         } else if (type == "answer") {
-            // If we're ignoring offers, also ignore answers
+            // If we're the impolite peer and ignored the offer, also ignore the answer
             if (x->node->ignore_offer) {
-                logpost(x, PD_DEBUG, "[p2p~] Ignoring answer due to glare");
+                logpost(x, PD_DEBUG, "[p2p~] Ignoring answer (impolite peer, glare resolved)");
                 x->node->ignore_offer = false;
                 return;
             }
@@ -548,11 +564,21 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
     x->report_clock = clock_new(&x->x_obj, (t_method)p2p_report);
 
     // Start transmission thread
+    // FIX Bug 4: We removed OpusRtpPacketizer as a media handler (see setup_webrtc),
+    // so audio_track->send() expects a complete RTP packet. We build a minimal
+    // 12-byte fixed RTP header here and append the Opus payload.
     x->node->tx_thread = std::thread([node = x->node]() {
         const int FRAME_SIZE = 480;
         float pcm_frame[FRAME_SIZE];
         int collected = 0;
         unsigned char opus_payload[4000];
+
+        // RTP state
+        uint16_t seq = 0;
+        uint32_t rtp_timestamp = 0;
+        const uint32_t ssrc = 12345;
+        const uint8_t payload_type = 111;
+        const uint32_t timestamp_increment = FRAME_SIZE; // 480 samples per 10ms frame @ 48kHz
 
         while (node->thread_running) {
             // Collect samples
@@ -565,10 +591,29 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
                     int bytes = opus_encode_float(node->opus_enc, pcm_frame, FRAME_SIZE,
                                                   opus_payload, sizeof(opus_payload));
                     if (bytes > 0) {
-                        rtc::binary rtp_payload(reinterpret_cast<std::byte *>(opus_payload),
-                                                reinterpret_cast<std::byte *>(opus_payload) +
-                                                    bytes);
-                        node->audio_track->send(rtp_payload);
+                        // Build 12-byte RTP header (RFC 3550)
+                        rtc::binary rtp_packet(12 + bytes);
+                        auto *p = reinterpret_cast<uint8_t *>(rtp_packet.data());
+
+                        p[0]  = 0x80;                             // V=2, P=0, X=0, CC=0
+                        p[1]  = payload_type & 0x7F;              // M=0, PT
+                        p[2]  = (seq >> 8) & 0xFF;                // Sequence (high)
+                        p[3]  = seq & 0xFF;                       // Sequence (low)
+                        p[4]  = (rtp_timestamp >> 24) & 0xFF;     // Timestamp
+                        p[5]  = (rtp_timestamp >> 16) & 0xFF;
+                        p[6]  = (rtp_timestamp >> 8)  & 0xFF;
+                        p[7]  = rtp_timestamp & 0xFF;
+                        p[8]  = (ssrc >> 24) & 0xFF;              // SSRC
+                        p[9]  = (ssrc >> 16) & 0xFF;
+                        p[10] = (ssrc >> 8)  & 0xFF;
+                        p[11] = ssrc & 0xFF;
+
+                        std::memcpy(p + 12, opus_payload, bytes);
+
+                        seq++;
+                        rtp_timestamp += timestamp_increment;
+
+                        node->audio_track->send(rtp_packet);
                     }
                 }
                 collected = 0;
