@@ -29,15 +29,15 @@ class SimpleP2P {
     addMediaStream(stream) {
         this.localStream = stream;
 
-        // Se já existirem conexões ativas, adiciona as faixas a elas
+        // Add tracks to all existing peer connections
         for (const [id, peer] of this.peers.entries()) {
-            if (peer.pc) {
+            if (peer.pc && peer.pc.connectionState === "connected") {
                 const senders = peer.pc.getSenders();
                 stream.getTracks().forEach((track) => {
-                    // Evita adicionar a mesma faixa duas vezes
                     const alreadyAdded = senders.find((s) => s.track === track);
                     if (!alreadyAdded) {
                         peer.pc.addTrack(track, stream);
+                        this._renegotiate(id); // Trigger renegotiation
                     }
                 });
             }
@@ -136,27 +136,94 @@ class SimpleP2P {
         }
     }
 
-    // --- Internal WebRTC Methods ---
+    async _renegotiate(peerId) {
+        const peer = this.peers.get(peerId);
+        if (!peer || !peer.pc) return;
 
+        try {
+            const offer = await peer.pc.createOffer();
+            await peer.pc.setLocalDescription(offer);
+            if (this.ws?.readyState === WebSocket.OPEN) {
+                this.ws.send(
+                    JSON.stringify({
+                        type: "offer",
+                        to: peerId,
+                        sdp: peer.pc.localDescription,
+                    }),
+                );
+            }
+        } catch (err) {
+            this.onError(`Renegotiation failed: ${err}`);
+        }
+    }
+
+    // ─────────────────────────────────────
     async _initiateConnection(peerId) {
         const peer = this.peers.get(peerId);
         if (!peer) return;
 
+        const shouldBeCaller = this._shouldBeCaller(peerId);
+        if (!shouldBeCaller) {
+            this.onLog(`Waiting for ${peerId} to initiate connection`);
+            return;
+        }
+
+        this.onLog(`Initiating connection as caller to ${peerId}`);
         const pc = await this._createPeerConnection(peerId, true);
+
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        this.ws.send(JSON.stringify({ type: "offer", to: peerId, sdp: offer }));
+        this.ws.send(
+            JSON.stringify({
+                type: "offer",
+                to: peerId,
+                sdp: offer,
+            }),
+        );
     }
 
     async _handleOffer(peerId, offer) {
+        const peer = this.peers.get(peerId);
+        if (!peer) return;
+
+        const shouldBeCaller = this._shouldBeCaller(peerId);
+
+        if (shouldBeCaller) {
+            // We should be caller but received offer - role conflict!
+            this.onError(`Role conflict with peer ${peerId}. Closing connection and retrying...`);
+
+            // Close existing connection
+            if (peer.pc) {
+                peer.pc.close();
+                peer.pc = null;
+            }
+
+            // Retry as caller
+            setTimeout(() => this._initiateConnection(peerId), 100);
+            return;
+        }
+
+        // We are the answerer - this is correct
+        this.onLog(`Handling offer as answerer from ${peerId}`);
         const pc = await this._createPeerConnection(peerId, false);
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
-        this.ws.send(JSON.stringify({ type: "answer", to: peerId, sdp: answer }));
+        this.ws.send(
+            JSON.stringify({
+                type: "answer",
+                to: peerId,
+                sdp: answer,
+            }),
+        );
+    }
+
+    _shouldBeCaller(peerId) {
+        const sortedIds = [this.myId, peerId].sort();
+        return sortedIds[0] === this.myId;
     }
 
     async _handleAnswer(peerId, answer) {
@@ -190,7 +257,11 @@ class SimpleP2P {
             const dc = pc.createDataChannel("data");
             this._setupDataChannel(peerId, dc);
         }
-        pc.ondatachannel = (event) => this._setupDataChannel(peerId, event.channel);
+        pc.ondatachannel = (event) => {
+            if (!isCaller) {
+                this._setupDataChannel(peerId, event.channel);
+            }
+        };
 
         // 2. Transmissão de Mídia (Local -> Remoto)
         if (this.localStream) {
