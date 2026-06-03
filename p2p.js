@@ -215,14 +215,29 @@ class SimpleP2P {
 
     async _handleIceCandidate(peerId, candidate) {
         const peer = this.peers.get(peerId);
-        if (peer?.pc) {
-            try {
-                await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
-            } catch (e) {
-                // Suppress harmless "cannot add ICE candidate in wrong state" errors
-                if (!candidate) return;
-                this.onError(`ICE candidate error for ${peerId}: ${e}`);
-            }
+        if (!peer) {
+            this.onLog(`Queueing ICE candidate from unknown peer ${peerId}`);
+            this.peers.set(peerId, {
+                name: "Unknown",
+                pc: null,
+                dc: null,
+                makingOffer: false,
+                pendingCandidates: [candidate],
+            });
+            return;
+        }
+
+        if (!peer.pc || !peer.pc.remoteDescription) {
+            peer.pendingCandidates ??= [];
+            peer.pendingCandidates.push(candidate);
+            this.onLog(`Queueing ICE candidate from ${peerId} (remote description not set yet)`);
+            return;
+        }
+
+        try {
+            await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (e) {
+            this.onError(`ICE candidate error for ${peerId}: ${e}`);
         }
     }
 

@@ -1,4 +1,4 @@
-#N canvas 0 0 925 1132 10;
+#N canvas 0 0 1112 1132 10;
 #X declare -path .build;
 #X declare -lib xlab;
 #X obj 2 4 declare -path .build;
@@ -12,8 +12,6 @@
 #X msg 73 249 stream \$1;
 #X obj 73 219 tgl 18 0 empty empty empty 0 -9 0 10 #fcfcfc #000000 #000000 0 1;
 #X obj 24 29 bng 18 250 50 0 empty empty empty 0 -9 0 10 #fcfcfc #000000 #000000;
-#X obj 24 356 else/vu~;
-#X obj 25 385 vu 14 80 empty empty -1 -9 0 10 #404040 #000000 0 0;
 #N canvas 0 0 925 1132 osc 0;
 #X obj 19 102 osc~;
 #X obj 166 191 line~;
@@ -43,7 +41,10 @@
 #X restore 24 72 pd osc;
 #X obj 42 150 mar~;
 #X msg 120 82 open /home/neimog/Documents/Git/OpenScofo/Tests/miniaturas/Audios/miniatura1.mp3 \, 1;
-#X connect 1 0 11 0;
+#X obj 24 329 saf.meter~ -width 8 -height 120 -frames 20 -inchs 1;
+#X obj 81 454 dac~;
+#X connect 1 0 14 0;
+#X connect 1 0 15 0;
 #X connect 1 1 4 0;
 #X connect 3 0 1 0;
 #X connect 4 0 5 0;
@@ -51,9 +52,7 @@
 #X connect 7 0 1 0;
 #X connect 8 0 1 0;
 #X connect 9 0 8 0;
-#X connect 10 0 13 0;
-#X connect 11 0 12 0;
-#X connect 11 1 12 1;
-#X connect 13 0 1 0;
-#X connect 14 0 1 0;
-#X connect 15 0 14 0;
+#X connect 10 0 11 0;
+#X connect 11 0 1 0;
+#X connect 12 0 1 0;
+#X connect 13 0 12 0;

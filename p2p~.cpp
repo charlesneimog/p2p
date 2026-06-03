@@ -375,8 +375,17 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
             x->peer_connected = x->peer_connected - 1;
             clock_delay(x->report_clock, 0);
         } else if (type == "existing-peers") {
-            x->peer_connected = (float)data["peers"].size();
+            auto peers = data["peers"];
+            x->peer_connected = peers.size();
             clock_delay(x->report_clock, 0);
+            if (!peers.empty()) {
+                x->node->remote_peer_id = peers[0]["id"].get<std::string>();
+                logpost(x, PD_NORMAL, "[p2p~] Connecting to existing peer %s",
+                        x->node->remote_peer_id.c_str());
+                setup_webrtc(x, true);
+                x->node->making_offer = true;
+                x->node->pc->setLocalDescription();
+            }
         } else if (type == "welcome") {
             logpost(x, PD_NORMAL, "[p2p~] Connection ID: %s",
                     data["id"].get<std::string>().c_str());
@@ -546,7 +555,7 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
     x->report_clock = clock_new(&x->x_obj, (t_method)p2p_report);
 
     x->node->tx_thread = std::thread([node = x->node]() {
-        const int FRAME_SIZE = 960;
+        const int FRAME_SIZE = 480;
         float pcm_frame[FRAME_SIZE];
         int collected = 0;
         unsigned char opus_payload[4000];
