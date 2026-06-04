@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # ╭──────────────────────────────────────╮
 # │               pd.cmake               │
@@ -24,6 +25,8 @@ if(NOT EXISTS "${CPM_FILE}")
     file(DOWNLOAD "https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.42.1/CPM.cmake" ${CPM_FILE})
 endif()
 include(${CPM_FILE})
+
+find_package(Boost REQUIRED)
 
 # ╭──────────────────────────────────────╮
 # │             Dependências             │
@@ -65,7 +68,8 @@ cpmaddpackage(
     "OPUS_BUILD_TESTING OFF"
     "OPUS_BUILD_PROGRAMS OFF")
 
-pd_add_external(p2p~ p2p~.cpp)
+pd_add_external(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p~.cpp")
+
 target_link_libraries(
     p2p_tilde
     PRIVATE ixwebsocket

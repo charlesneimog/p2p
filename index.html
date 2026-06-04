@@ -91,26 +91,22 @@
             <div>
                 <input type="text" id="room" placeholder="Sala" value="demo" />
                 <input type="text" id="name" placeholder="Seu nome" value="User" />
-                <button id="connectBtn">Conectar</button>
-                <button id="disconnectBtn" disabled>Desconectar</button>
+                <button id="connectBtn">Connect</button>
+                <button id="disconnectBtn" disabled>Desconect</button>
             </div>
-            <div id="status" class="status disconnected">Desconectado</div>
+            <div id="status" class="status disconnected">Desconected</div>
         </div>
 
         <div class="card">
-            <h4>Participantes</h4>
-            <div id="peersList">Nenhum</div>
+            <h4>Peers</h4>
+            <div id="peersList">None</div>
         </div>
 
         <div class="card">
             <h4>Mensagens</h4>
-            <button id="sendMsgBtn">Enviar "Ola P2P!"</button>
-            <div class="log" id="log"></div>
-        </div>
-
-        <div class="card">
-            <h4>Audio</h4>
+            <button id="sendMsgBtn">Send "Hello P2P!"</button>
             <button id="initAudioBtn">Init Mic</button>
+            <div class="log" id="log"></div>
         </div>
 
         <script src="p2p.js"></script>
@@ -145,7 +141,7 @@
 
             function renderPeers() {
                 if (!network || network.peers.size === 0) {
-                    peersListDiv.innerHTML = "Nenhum participante";
+                    peersListDiv.innerHTML = "Room is empty";
                     return;
                 }
 
@@ -153,7 +149,7 @@
                 for (const [id, peer] of network.peers.entries()) {
                     const isOnline = peer.dc?.readyState === "open";
                     html += `<div class="peer ${isOnline ? "online" : ""}">
-                    * ${peer.name}
+                    ${peer.name}
                 </div>`;
                 }
                 peersListDiv.innerHTML = html;
