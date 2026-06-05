@@ -37,7 +37,7 @@ jobs:
                   brew install boost
             - name: Build
               run: |
-                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DPYVERSION=${{ matrix.python.python }} -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DPYVERSION=${{ matrix.python.python }} -DCMAKE_OSX_ARCHITECTURES="arm64"
                   cmake --build build --parallel
             - name: Upload ONNX Folder
               uses: actions/upload-artifact@v4
