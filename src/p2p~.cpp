@@ -10,6 +10,8 @@
 #include <chrono>
 #include <map>
 #include <random>
+#include <cstdarg>
+#include <cstdio>
 
 #include <ixwebsocket/IXNetSystem.h>
 #include <ixwebsocket/IXWebSocket.h>
@@ -19,9 +21,8 @@
 
 #include <boost/lockfree/spsc_queue.hpp>
 
-#include "message_queue.hpp"
-
 using json = nlohmann::json;
+static t_class *p2p_tilde_class;
 
 // ─────────────────────────────────────
 struct QueuedCandidate {
@@ -29,8 +30,8 @@ struct QueuedCandidate {
     std::string mid;
 };
 
+// ─────────────────────────────────────
 struct P2PNode {
-    // Connection state
     std::string user;
     std::string remote_peer_id;
     std::atomic<bool> is_streaming{false};
@@ -75,8 +76,17 @@ struct P2PNode {
 };
 
 // ─────────────────────────────────────
-static t_class *p2p_tilde_class;
+struct p2p_tilde_messdata {
+    enum P2P_MESS {
+        LOG,
+        MESSAGE,
+    };
+    P2P_MESS type;
+    std::string msg;
+    t_loglevel level;
+};
 
+// ─────────────────────────────────────
 struct p2p_tilde {
     t_object x_obj;
     t_sample x_f;
@@ -96,6 +106,25 @@ struct p2p_tilde {
     int max_out_channels;
     int max_in_channels;
 };
+
+// ─────────────────────────────────────
+static void p2p_tilde_mess(t_pd *obj, void *data) {
+    p2p_tilde *x = (p2p_tilde *)obj;
+    p2p_tilde_messdata *d = (p2p_tilde_messdata *)data;
+
+    switch (d->type) {
+    case p2p_tilde_messdata::LOG: {
+        logpost(x, d->level, "[p2p~] %s", d->msg.c_str());
+        break;
+    }
+    case p2p_tilde_messdata::MESSAGE: {
+        break;
+    }
+    }
+
+    delete d;
+    return;
+}
 
 // ─────────────────────────────────────
 static P2PNode *p2p_find_node_by_peer(p2p_tilde *x, const std::string &peer_id) {
@@ -345,6 +374,9 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
         p2p_safelogpost(x, PD_DEBUG, "Received: %s from %s", type.c_str(), from_peer.c_str());
 
         if (type == "peer-joined") {
+            logpost(x, PD_DEBUG, "%s", data.dump(3).c_str());
+
+            // WORK FOR BROWSER -> PD and PD -> TO BROWSER
             P2PNode *node = p2p_tilde_find_free_node(x);
             if (!node) {
                 p2p_safelogpost(x, PD_ERROR, "No free nodes available for peer %s",
@@ -364,29 +396,6 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
             clock_delay(x->report_clock, 0);
             node->making_offer = true;
             node->pc->setLocalDescription();
-
-            /* WORK FOR PD -> PD not for BROWSER -> PD or PD -> BROWSER
-                P2PNode *node = find_free_node(x);
-                if (!node) {
-                    safelogpost(x, PD_ERROR, "No free nodes available for peer %s",
-               from_peer.c_str()); return;
-                }
-
-                std::string peer_name = data.contains("peer") && data["peer"].contains("name")
-                                            ? data["peer"]["name"].get<std::string>()
-                                            : from_peer;
-
-                node->user = peer_name;
-                node->remote_peer_id = from_peer;
-                node->ws = x->shared_ws;
-
-                setup_webrtc_for_node(x, node, false);
-
-                x->peer_connected = count_active_nodes(x);
-                clock_delay(x->report_clock, 0);
-
-                safelogpost(x, PD_NORMAL, "Peer '%s' joined, waiting for offer", peer_name.c_str());
-                */
 
         } else if (type == "offer") {
             P2PNode *node = p2p_find_node_by_peer(x, from_peer);
