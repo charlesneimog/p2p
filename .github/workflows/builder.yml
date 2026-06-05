@@ -35,8 +35,11 @@ jobs:
               run: |
                   brew install pd
                   brew install boost
+                  ls -la $(brew --prefix boost)/include/boost/lockfree
+                  find $(brew --prefix boost)/include -name spsc_queue.hpp
             - name: Build
               run: |
+                  export CXXFLAGS="-I$(brew --prefix boost)/include"
                   cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DPYVERSION=${{ matrix.python.python }} -DCMAKE_OSX_ARCHITECTURES="arm64"       -DBOOST_ROOT=$(brew --prefix boost) -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include
                   cmake --build build --parallel
             - name: Upload ONNX Folder
