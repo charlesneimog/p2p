@@ -70,6 +70,7 @@ cpmaddpackage(
 
 pd_add_external(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p~.cpp")
 target_include_directories(p2p_tilde PRIVATE "${opus_SOURCE_DIR}/include")
+message(WARNING "${opus_SOURCE_DIR}")
 target_link_libraries(
     p2p_tilde
     PRIVATE ixwebsocket

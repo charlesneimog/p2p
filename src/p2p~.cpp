@@ -17,7 +17,7 @@
 #include <ixwebsocket/IXWebSocket.h>
 #include <nlohmann/json.hpp>
 #include <rtc/rtc.hpp>
-#include <opus/opus.h>
+#include <opus.h>
 
 #include <boost/lockfree/spsc_queue.hpp>
 
