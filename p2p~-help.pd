@@ -1,9 +1,9 @@
-#N canvas 0 0 1112 1132 10;
+#N canvas 0 0 1299 1132 10;
 #X declare -path .build;
 #X declare -lib xlab;
 #X obj 2 4 declare -path .build;
 #X obj 157 8 declare -lib xlab;
-#X msg 56 120 disconnect;
+#X msg 47 143 disconnect;
 #X obj 195 361 route peers;
 #X obj 195 395 change;
 #X obj 195 417 nbx 5 16 -1e+37 1e+37 0 0 empty empty empty 0 -9 0 10 #fcfcfc #000000 #000000 0 256;
@@ -40,9 +40,15 @@
 #X obj 258 394 print;
 #X obj 24 391 saf.meter~ -width 8 -height 120 -frames 20 -inchs 8;
 #X obj 24 337 p2p~ -o 8 -f, f 29;
-#X msg 45 99 connect wss://p2p-signaling.charlesneimog.workers.dev demo PureData, f 71;
-#X obj 70 263 nbx 5 16 -1e+37 1e+37 0 0 empty empty empty 0 -9 0 10 #fcfcfc #000000 #000000 0 256;
-#X msg 70 284 setchannel Charles \$1;
+#X msg 36 122 connect wss://p2p-signaling.charlesneimog.workers.dev demo PureData, f 71;
+#X obj 70 283 nbx 5 16 -1e+37 1e+37 0 1 empty empty empty 0 -9 0 10 #fcfcfc #000000 #000000 1 256;
+#X msg 70 304 setchannel User \$1;
+#X obj 34 100 cnv 18 1 1 empty empty 1 6 10 0 10 #ffc7c6 #ff0400 0;
+#X obj 85 204 cnv 18 1 1 empty empty 2 6 10 0 10 #ffc7c6 #ff0400 0;
+#X obj 128 281 cnv 18 1 1 empty empty 3 6 10 0 10 #ffc7c6 #ff0400 0;
+#X obj 43 28 cnv 18 1 1 empty empty 4 6 10 0 10 #ffc7c6 #ff0400 0;
+#X obj 180 234 readsf~;
+#X msg 144 175 open /home/neimog/Nextcloud/Gravações/miniatura3.wav \, 1;
 #X connect 2 0 12 0;
 #X connect 3 0 4 0;
 #X connect 3 1 10 0;
@@ -56,3 +62,5 @@
 #X connect 13 0 12 0;
 #X connect 14 0 15 0;
 #X connect 15 0 12 0;
+#X connect 20 0 12 0;
+#X connect 21 0 20 0;

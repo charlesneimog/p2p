@@ -9,6 +9,7 @@
 #include <thread>
 #include <chrono>
 #include <map>
+#include <random>
 
 #include <ixwebsocket/IXNetSystem.h>
 #include <ixwebsocket/IXWebSocket.h>
@@ -75,6 +76,7 @@ struct P2PNode {
 
 // ─────────────────────────────────────
 static t_class *p2p_tilde_class;
+
 struct p2p_tilde {
     t_object x_obj;
     t_sample x_f;
@@ -87,13 +89,16 @@ struct p2p_tilde {
 
     std::unordered_map<std::string, int> peers_channels;
 
+    std::string local_peer_id;
+    bool wants_stream;
     bool multichannel;
     bool fixchannels;
-    int max_channels;
+    int max_out_channels;
+    int max_in_channels;
 };
 
 // ─────────────────────────────────────
-static P2PNode *find_node_by_peer(p2p_tilde *x, const std::string &peer_id) {
+static P2PNode *p2p_find_node_by_peer(p2p_tilde *x, const std::string &peer_id) {
     for (auto &node : x->nodes) {
         if (node->remote_peer_id == peer_id) {
             return node.get();
@@ -103,7 +108,7 @@ static P2PNode *find_node_by_peer(p2p_tilde *x, const std::string &peer_id) {
 }
 
 // ─────────────────────────────────────
-static P2PNode *find_free_node(p2p_tilde *x) {
+static P2PNode *p2p_tilde_find_free_node(p2p_tilde *x) {
     for (auto &node : x->nodes) {
         if (node->remote_peer_id.empty() && !node->pc) {
             return node.get();
@@ -113,7 +118,7 @@ static P2PNode *find_free_node(p2p_tilde *x) {
 }
 
 // ─────────────────────────────────────
-static int count_active_nodes(p2p_tilde *x) {
+static int p2p_count_active_nodes(p2p_tilde *x) {
     int count = 0;
     for (auto &node : x->nodes) {
         if (!node->remote_peer_id.empty() && node->pc) {
@@ -124,7 +129,7 @@ static int count_active_nodes(p2p_tilde *x) {
 }
 
 // ─────────────────────────────────────
-inline void safelogpost(p2p_tilde *x, t_loglevel level, const char *fmt, ...) {
+inline void p2p_safelogpost(p2p_tilde *x, t_loglevel level, const char *fmt, ...) {
     char buf[1024];
     va_list args;
     va_start(args, fmt);
@@ -140,27 +145,26 @@ inline void safelogpost(p2p_tilde *x, t_loglevel level, const char *fmt, ...) {
 }
 
 // ─────────────────────────────────────
-static void setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_caller) {
+static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_caller) {
     rtc::Configuration config;
     config.iceServers.emplace_back("stun:stun.l.google.com:19302");
     node->pc = std::make_shared<rtc::PeerConnection>(config);
     node->remote_description_set = false;
 
     node->pc->onStateChange([x, node](rtc::PeerConnection::State state) {
-        safelogpost(x, PD_DEBUG, "[p2p~] PC State for peer %s: %d", node->remote_peer_id.c_str(),
-                    state);
+        p2p_safelogpost(x, PD_DEBUG, "PC State for peer %s: %d", node->remote_peer_id.c_str(),
+                        state);
         if (state == rtc::PeerConnection::State::Failed) {
-            safelogpost(x, PD_ERROR, "[p2p~] Connection failed for peer %s!",
-                        node->remote_peer_id.c_str());
+            p2p_safelogpost(x, PD_ERROR, "Connection failed for peer %s!",
+                            node->remote_peer_id.c_str());
         } else if (state == rtc::PeerConnection::State::Connected) {
-            safelogpost(x, PD_NORMAL, "[p2p~] WebRTC Connected to peer %s!",
-                        node->remote_peer_id.c_str());
+            p2p_safelogpost(x, PD_NORMAL, "WebRTC Connected to peer '%s'!", node->user.c_str());
         }
     });
 
     node->pc->onSignalingStateChange([x, node](rtc::PeerConnection::SignalingState state) {
-        safelogpost(x, PD_DEBUG, "[p2p~] Signaling State for peer %s: %d",
-                    node->remote_peer_id.c_str(), state);
+        p2p_safelogpost(x, PD_DEBUG, "Signaling State for peer %s: %d",
+                        node->remote_peer_id.c_str(), state);
         if (state == rtc::PeerConnection::SignalingState::Stable) {
             node->making_offer = false;
         }
@@ -173,10 +177,17 @@ static void setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_caller) {
                 {"sdp", {{"type", description.typeString()}, {"sdp", std::string(description)}}},
                 {"to", node->remote_peer_id}};
             node->ws->send(msg.dump());
-            safelogpost(x, PD_DEBUG, "[p2p~] Sent %s to %s", description.typeString().c_str(),
-                        node->remote_peer_id.c_str());
+            p2p_safelogpost(x, PD_DEBUG, "Sent %s to %s", description.typeString().c_str(),
+                            node->remote_peer_id.c_str());
         }
-        node->making_offer = false;
+
+        p2p_safelogpost(x, PD_NORMAL, "Sending %s to %s", description.typeString().c_str(),
+                        node->remote_peer_id.c_str());
+
+        // Do NOT clear making_offer here. This callback fires when we send the
+        // offer/answer, but the offer is still in-flight. The glare guard
+        // (making_offer && !is_polite) must stay true until the full exchange
+        // completes. Only onSignalingStateChange->Stable clears it.
     });
 
     node->pc->onLocalCandidate([x, node](rtc::Candidate candidate) {
@@ -188,8 +199,7 @@ static void setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_caller) {
             msg["candidate"]["sdpMLineIndex"] = 0;
             msg["to"] = node->remote_peer_id;
             node->ws->send(msg.dump());
-            safelogpost(x, PD_DEBUG, "[p2p~] Sent ICE candidate to %s",
-                        node->remote_peer_id.c_str());
+            p2p_safelogpost(x, PD_DEBUG, "Sent ICE candidate to %s", node->remote_peer_id.c_str());
         }
     });
 
@@ -198,12 +208,12 @@ static void setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_caller) {
     audio.setBitrate(64000);
     node->audio_track = node->pc->addTrack(audio);
     if (!node->audio_track) {
-        safelogpost(x, PD_ERROR, "[p2p~] Failed to add audio track for peer %s",
-                    node->remote_peer_id.c_str());
+        p2p_safelogpost(x, PD_ERROR, "Failed to add audio track for peer %s",
+                        node->remote_peer_id.c_str());
         return;
     }
 
-    safelogpost(x, PD_NORMAL, "[p2p~] Audio track added for peer %s", node->remote_peer_id.c_str());
+    p2p_safelogpost(x, PD_NORMAL, "Audio track added for peer '%s'", node->user.c_str());
 
     node->audio_track->setMediaHandler(std::make_shared<rtc::OpusRtpDepacketizer>());
     node->audio_track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
@@ -226,255 +236,49 @@ static void setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_caller) {
 
     node->pc->onTrack([x, node](std::shared_ptr<rtc::Track> track) {
         if (track->description().type() == "audio") {
-            safelogpost(x, PD_NORMAL, "[p2p~] Remote audio track active for peer %s",
-                        node->remote_peer_id.c_str());
+            p2p_safelogpost(x, PD_NORMAL, "Remote audio track active for peer %s",
+                            node->remote_peer_id.c_str());
         }
     });
 
     if (is_caller) {
         node->dc = node->pc->createDataChannel("pd_data");
         node->dc->onOpen([x, node]() {
-            safelogpost(x, PD_NORMAL, "[p2p~] DataChannel open with peer %s",
-                        node->remote_peer_id.c_str());
+            p2p_safelogpost(x, PD_NORMAL, "DataChannel open with peer '%s'", node->user.c_str());
         });
     } else {
         node->pc->onDataChannel([x, node](std::shared_ptr<rtc::DataChannel> dc) {
             node->dc = dc;
             node->dc->onOpen([x, node]() {
-                safelogpost(x, PD_NORMAL, "[p2p~] DataChannel open with peer %s",
-                            node->remote_peer_id.c_str());
+                p2p_safelogpost(x, PD_NORMAL, "DataChannel open with peer %s",
+                                node->remote_peer_id.c_str());
             });
         });
     }
 }
 
 // ─────────────────────────────────────
-static void flush_pending_candidates(p2p_tilde *x, P2PNode *node) {
+static void p2p_flush_pending_candidates(p2p_tilde *x, P2PNode *node) {
     for (const auto &qc : node->pending_remote_candidates) {
         try {
             rtc::Candidate rtc_cand(qc.candidate, qc.mid);
             node->pc->addRemoteCandidate(rtc_cand);
-            safelogpost(x, PD_DEBUG, "[p2p~] Flushed candidate for peer %s",
-                        node->remote_peer_id.c_str());
+            p2p_safelogpost(x, PD_DEBUG, "Flushed candidate for peer %s",
+                            node->remote_peer_id.c_str());
         } catch (const std::exception &e) {
-            safelogpost(x, PD_ERROR, "[p2p~] Failed to add queued candidate: %s", e.what());
+            p2p_safelogpost(x, PD_ERROR, "Failed to add queued candidate: %s", e.what());
         }
     }
     node->pending_remote_candidates.clear();
 }
 
 // ─────────────────────────────────────
-static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *user) {
-    if (!x->shared_ws) {
-        x->shared_ws = std::make_shared<ix::WebSocket>();
+static void p2p_stream(p2p_tilde *x, t_float f) {
+    x->wants_stream = (f != 0);
+    for (auto &node : x->nodes) {
+        node->is_streaming = x->wants_stream;
     }
-
-    std::string url = std::string(wss->s_name) + "/?room=" + std::string(room->s_name);
-    x->shared_ws->setUrl(url);
-    ix::WebSocketHttpHeaders headers;
-    headers["Origin"] = "https://charlesneimog.github.io";
-    x->shared_ws->setExtraHeaders(headers);
-    std::string username = std::string(user->s_name);
-
-    x->shared_ws->setOnMessageCallback([x, username](const ix::WebSocketMessagePtr &msg) {
-        if (msg->type == ix::WebSocketMessageType::Open) {
-            json join = {{"type", "join"}, {"name", username}};
-            x->shared_ws->send(join.dump());
-            safelogpost(x, PD_NORMAL, "[p2p~] Connected to the room");
-            return;
-        }
-
-        if (msg->type != ix::WebSocketMessageType::Message) {
-            return;
-        }
-
-        json data = json::parse(msg->str);
-        std::string type = data["type"];
-        std::string from_peer = data.contains("from") ? data["from"].get<std::string>() : "";
-        safelogpost(x, PD_DEBUG, "[p2p~] Received: %s from %s", type.c_str(), from_peer.c_str());
-
-        if (type == "peer-joined") {
-            P2PNode *node = find_free_node(x);
-            if (!node) {
-                safelogpost(x, PD_ERROR, "[p2p~] No free nodes available for peer %s",
-                            from_peer.c_str());
-                return;
-            }
-
-            // FIX Bug 1: store the peer's display name so setchannel lookup works.
-            // The signaling server sends the name inside data["peer"]["name"].
-            std::string peer_name = data.contains("peer") && data["peer"].contains("name")
-                                        ? data["peer"]["name"].get<std::string>()
-                                        : from_peer;
-            node->user = peer_name;
-            node->remote_peer_id = from_peer;
-            node->ws = x->shared_ws;
-            node->is_polite = false;
-            setup_webrtc_for_node(x, node, true);
-            x->peer_connected = count_active_nodes(x);
-            clock_delay(x->report_clock, 0);
-            node->making_offer = true;
-            node->pc->setLocalDescription();
-
-        } else if (type == "offer") {
-            P2PNode *node = find_node_by_peer(x, from_peer);
-            if (!node) {
-                // No existing node for this peer — browser initiated first, PD is polite.
-                node = find_free_node(x);
-                if (!node) {
-                    safelogpost(x, PD_ERROR, "[p2p~] No free nodes for offer from %s",
-                                from_peer.c_str());
-                    return;
-                }
-                node->remote_peer_id = from_peer;
-                node->ws = x->shared_ws;
-                // FIX Bug 2: only set is_polite=true when we are truly the answerer
-                // (no existing PC). If pc already exists from existing-peers, is_polite
-                // stays false and we win the glare collision below.
-                node->is_polite = true;
-                setup_webrtc_for_node(x, node, false);
-            }
-            // If node already exists (set up from existing-peers with is_polite=false),
-            // do not overwrite is_polite — the impolite-peer glare logic must stay intact.
-
-            if (node->making_offer && !node->is_polite) {
-                safelogpost(x, PD_DEBUG, "[p2p~] Glare: ignoring offer from %s (impolite)",
-                            from_peer.c_str());
-                node->ignore_offer = true;
-                return;
-            }
-            node->making_offer = false;
-            node->ignore_offer = false;
-
-            std::string sdp_str;
-            if (data["sdp"].is_object()) {
-                sdp_str = data["sdp"]["sdp"].get<std::string>();
-            } else if (data["sdp"].is_string()) {
-                sdp_str = data["sdp"].get<std::string>();
-            } else {
-                safelogpost(x, PD_ERROR, "[p2p~] Invalid SDP format");
-                return;
-            }
-
-            try {
-                rtc::Description desc(sdp_str, "offer");
-                node->pc->setRemoteDescription(std::move(desc));
-                node->remote_description_set = true;
-                flush_pending_candidates(x, node);
-                node->making_offer = true;
-                node->pc->setLocalDescription();
-            } catch (const std::exception &e) {
-                safelogpost(x, PD_ERROR, "[p2p~] Failed to set remote description: %s", e.what());
-            }
-
-        } else if (type == "answer") {
-            P2PNode *node = find_node_by_peer(x, from_peer);
-            if (!node) {
-                return;
-            }
-
-            if (node->ignore_offer) {
-                safelogpost(x, PD_DEBUG, "[p2p~] Ignoring answer from %s", from_peer.c_str());
-                node->ignore_offer = false;
-                return;
-            }
-
-            std::string sdp_str;
-            if (data["sdp"].is_object()) {
-                sdp_str = data["sdp"]["sdp"].get<std::string>();
-            } else if (data["sdp"].is_string()) {
-                sdp_str = data["sdp"].get<std::string>();
-            } else {
-                safelogpost(x, PD_ERROR, "[p2p~] Invalid SDP format");
-                return;
-            }
-
-            try {
-                rtc::Description desc(sdp_str, "answer");
-                node->pc->setRemoteDescription(std::move(desc));
-                node->remote_description_set = true;
-                flush_pending_candidates(x, node);
-            } catch (const std::exception &e) {
-                safelogpost(x, PD_ERROR, "[p2p~] Failed to set remote description: %s", e.what());
-            }
-
-        } else if (type == "ice-candidate") {
-            P2PNode *node = find_node_by_peer(x, from_peer);
-            if (!node) {
-                return;
-            }
-
-            auto cand = data["candidate"];
-            std::string cand_str = cand["candidate"].get<std::string>();
-            std::string mid = cand["sdpMid"].get<std::string>();
-
-            if (!node->remote_description_set) {
-                safelogpost(x, PD_DEBUG, "[p2p~] Queuing ICE candidate from %s", from_peer.c_str());
-                node->pending_remote_candidates.push_back({cand_str, mid});
-            } else {
-                try {
-                    rtc::Candidate rtc_cand(cand_str, mid);
-                    node->pc->addRemoteCandidate(rtc_cand);
-                    safelogpost(x, PD_DEBUG, "[p2p~] Added ICE candidate from %s",
-                                from_peer.c_str());
-                } catch (const std::exception &e) {
-                    safelogpost(x, PD_ERROR, "[p2p~] Failed to add candidate: %s", e.what());
-                }
-            }
-
-        } else if (type == "peer-left") {
-            P2PNode *node = find_node_by_peer(x, from_peer);
-            if (node) {
-                node->is_streaming = false;
-                node->remote_description_set = false;
-                if (node->dc) {
-                    node->dc->close();
-                    node->dc.reset();
-                }
-                if (node->audio_track) {
-                    node->audio_track->close();
-                    node->audio_track.reset();
-                }
-                if (node->pc) {
-                    node->pc->close();
-                    node->pc.reset();
-                }
-                node->remote_peer_id.clear();
-                node->user.clear();
-                node->pending_remote_candidates.clear();
-            }
-            x->peer_connected = count_active_nodes(x);
-            clock_delay(x->report_clock, 0);
-
-        } else if (type == "existing-peers") {
-            auto peers = data["peers"];
-            for (const auto &peer : peers) {
-                std::string peer_id = peer["id"].get<std::string>();
-                std::string peer_name = peer["name"].get<std::string>();
-                P2PNode *node = find_free_node(x);
-                if (node) {
-                    node->user = peer_name;
-                    node->remote_peer_id = peer_id;
-                    node->ws = x->shared_ws;
-                    node->is_polite = false;
-                    setup_webrtc_for_node(x, node, true);
-                    node->making_offer = true;
-                    node->pc->setLocalDescription();
-                    safelogpost(x, PD_NORMAL, "[p2p~] Connecting to existing peer %s (%s)",
-                                peer_name.c_str(), peer_id.substr(0, 8).c_str());
-                }
-            }
-            x->peer_connected = count_active_nodes(x);
-            clock_delay(x->report_clock, 0);
-
-        } else if (type == "welcome") {
-            safelogpost(x, PD_NORMAL, "[p2p~] Connection ID: %s",
-                        data["id"].get<std::string>().c_str());
-        }
-    });
-
-    x->shared_ws->start();
-    safelogpost(x, PD_NORMAL, "[p2p~] Connecting...");
+    p2p_safelogpost(x, PD_NORMAL, "Stream %s", x->wants_stream ? "active" : "paused");
 }
 
 // ─────────────────────────────────────
@@ -505,31 +309,256 @@ static void p2p_disconnect(p2p_tilde *x) {
 
     x->peer_connected = 0;
     clock_delay(x->report_clock, 0);
-    safelogpost(x, PD_NORMAL, "[p2p~] Disconnected");
+    p2p_safelogpost(x, PD_NORMAL, "Disconnected");
 }
 
 // ─────────────────────────────────────
-static void p2p_stream(p2p_tilde *x, t_float f) {
-    bool wants_stream = (f != 0);
-    for (auto &node : x->nodes) {
-        node->is_streaming = wants_stream;
+static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *user) {
+    if (!x->shared_ws) {
+        x->shared_ws = std::make_shared<ix::WebSocket>();
+    } else {
+        p2p_disconnect(x);
     }
-    safelogpost(x, PD_NORMAL, "Stream %s", wants_stream ? "active" : "paused");
+
+    std::string url = std::string(wss->s_name) + "/?room=" + std::string(room->s_name);
+    x->shared_ws->setUrl(url);
+    ix::WebSocketHttpHeaders headers;
+    headers["Origin"] = "https://charlesneimog.github.io";
+    x->shared_ws->setExtraHeaders(headers);
+    std::string username = std::string(user->s_name);
+
+    x->shared_ws->setOnMessageCallback([x, username, room](const ix::WebSocketMessagePtr &msg) {
+        if (msg->type == ix::WebSocketMessageType::Open) {
+            json join = {{"type", "join"}, {"name", username}};
+            x->shared_ws->send(join.dump());
+            p2p_safelogpost(x, PD_NORMAL, "Connected to the room: '%s'", room->s_name);
+            return;
+        }
+
+        if (msg->type != ix::WebSocketMessageType::Message) {
+            return;
+        }
+
+        json data = json::parse(msg->str);
+        std::string type = data["type"];
+        std::string from_peer = data.contains("from") ? data["from"].get<std::string>() : "";
+        p2p_safelogpost(x, PD_DEBUG, "Received: %s from %s", type.c_str(), from_peer.c_str());
+
+        if (type == "peer-joined") {
+            P2PNode *node = p2p_tilde_find_free_node(x);
+            if (!node) {
+                p2p_safelogpost(x, PD_ERROR, "No free nodes available for peer %s",
+                                from_peer.c_str());
+                return;
+            }
+
+            std::string peer_name = data.contains("peer") && data["peer"].contains("name")
+                                        ? data["peer"]["name"].get<std::string>()
+                                        : from_peer;
+            node->user = peer_name;
+            node->remote_peer_id = from_peer;
+            node->ws = x->shared_ws;
+            node->is_polite = false;
+            p2p_setup_webrtc_for_node(x, node, true);
+            x->peer_connected = p2p_count_active_nodes(x);
+            clock_delay(x->report_clock, 0);
+            node->making_offer = true;
+            node->pc->setLocalDescription();
+
+            /* WORK FOR PD -> PD not for BROWSER -> PD or PD -> BROWSER
+                P2PNode *node = find_free_node(x);
+                if (!node) {
+                    safelogpost(x, PD_ERROR, "No free nodes available for peer %s",
+               from_peer.c_str()); return;
+                }
+
+                std::string peer_name = data.contains("peer") && data["peer"].contains("name")
+                                            ? data["peer"]["name"].get<std::string>()
+                                            : from_peer;
+
+                node->user = peer_name;
+                node->remote_peer_id = from_peer;
+                node->ws = x->shared_ws;
+
+                setup_webrtc_for_node(x, node, false);
+
+                x->peer_connected = count_active_nodes(x);
+                clock_delay(x->report_clock, 0);
+
+                safelogpost(x, PD_NORMAL, "Peer '%s' joined, waiting for offer", peer_name.c_str());
+                */
+
+        } else if (type == "offer") {
+            P2PNode *node = p2p_find_node_by_peer(x, from_peer);
+            if (!node) {
+                node = p2p_tilde_find_free_node(x);
+                if (!node) {
+                    p2p_safelogpost(x, PD_ERROR, "No free nodes for offer from %s",
+                                    from_peer.c_str());
+                    return;
+                }
+                node->remote_peer_id = from_peer;
+                node->ws = x->shared_ws;
+                node->is_polite = true;
+                p2p_setup_webrtc_for_node(x, node, false);
+            }
+            if (node->making_offer && !node->is_polite) {
+                p2p_safelogpost(x, PD_DEBUG, "Glare: ignoring offer from %s (impolite)",
+                                from_peer.c_str());
+                node->ignore_offer = true;
+                return;
+            }
+            node->ignore_offer = false;
+
+            std::string sdp_str;
+            if (data["sdp"].is_object()) {
+                sdp_str = data["sdp"]["sdp"].get<std::string>();
+            } else if (data["sdp"].is_string()) {
+                sdp_str = data["sdp"].get<std::string>();
+            } else {
+                p2p_safelogpost(x, PD_ERROR, "Invalid SDP format");
+                return;
+            }
+
+            try {
+                rtc::Description desc(sdp_str, "offer");
+                node->pc->setRemoteDescription(std::move(desc));
+                node->remote_description_set = true;
+                p2p_flush_pending_candidates(x, node);
+                node->making_offer = true;
+                node->pc->setLocalDescription();
+            } catch (const std::exception &e) {
+                p2p_safelogpost(x, PD_ERROR, "Failed to set remote description: %s", e.what());
+            }
+
+        } else if (type == "answer") {
+            P2PNode *node = p2p_find_node_by_peer(x, from_peer);
+            if (!node) {
+                return;
+            }
+
+            if (node->ignore_offer) {
+                p2p_safelogpost(x, PD_DEBUG, "Ignoring answer from %s", from_peer.c_str());
+                node->ignore_offer = false;
+                return;
+            }
+
+            std::string sdp_str;
+            if (data["sdp"].is_object()) {
+                sdp_str = data["sdp"]["sdp"].get<std::string>();
+            } else if (data["sdp"].is_string()) {
+                sdp_str = data["sdp"].get<std::string>();
+            } else {
+                p2p_safelogpost(x, PD_ERROR, "Invalid SDP format");
+                return;
+            }
+
+            try {
+                rtc::Description desc(sdp_str, "answer");
+                node->pc->setRemoteDescription(std::move(desc));
+                node->remote_description_set = true;
+                p2p_flush_pending_candidates(x, node);
+            } catch (const std::exception &e) {
+                p2p_safelogpost(x, PD_ERROR, "Failed to set remote description: %s", e.what());
+            }
+
+        } else if (type == "ice-candidate") {
+            P2PNode *node = p2p_find_node_by_peer(x, from_peer);
+            if (!node) {
+                return;
+            }
+
+            auto cand = data["candidate"];
+            std::string cand_str = cand["candidate"].get<std::string>();
+            std::string mid = cand["sdpMid"].get<std::string>();
+
+            if (!node->remote_description_set) {
+                p2p_safelogpost(x, PD_DEBUG, "Queuing ICE candidate from %s", from_peer.c_str());
+                node->pending_remote_candidates.push_back({cand_str, mid});
+            } else {
+                try {
+                    rtc::Candidate rtc_cand(cand_str, mid);
+                    node->pc->addRemoteCandidate(rtc_cand);
+                    p2p_safelogpost(x, PD_DEBUG, "Added ICE candidate from %s", from_peer.c_str());
+                } catch (const std::exception &e) {
+                    p2p_safelogpost(x, PD_ERROR, "Failed to add candidate: %s", e.what());
+                }
+            }
+
+        } else if (type == "peer-left") {
+            P2PNode *node = p2p_find_node_by_peer(x, from_peer);
+            if (node) {
+                node->is_streaming = false;
+                node->remote_description_set = false;
+                if (node->dc) {
+                    node->dc->close();
+                    node->dc.reset();
+                }
+                if (node->audio_track) {
+                    node->audio_track->close();
+                    node->audio_track.reset();
+                }
+                if (node->pc) {
+                    node->pc->close();
+                    node->pc.reset();
+                }
+                node->remote_peer_id.clear();
+                node->user.clear();
+                node->pending_remote_candidates.clear();
+            }
+            x->peer_connected = p2p_count_active_nodes(x);
+            clock_delay(x->report_clock, 0);
+
+        } else if (type == "existing-peers") {
+            auto peers = data["peers"];
+            for (const auto &peer : peers) {
+                std::string peer_id = peer["id"].get<std::string>();
+                std::string peer_name = peer["name"].get<std::string>();
+                P2PNode *node = p2p_tilde_find_free_node(x);
+                if (node) {
+                    node->user = peer_name;
+                    node->remote_peer_id = peer_id;
+                    node->ws = x->shared_ws;
+                    node->is_polite = false;
+                    p2p_setup_webrtc_for_node(x, node, true);
+                    node->making_offer = true;
+                    node->pc->setLocalDescription();
+                    p2p_safelogpost(x, PD_NORMAL, "Connecting to existing peer '%s' (%s)",
+                                    peer_name.c_str(), peer_id.substr(0, 6).c_str());
+                }
+            }
+            x->peer_connected = p2p_count_active_nodes(x);
+            clock_delay(x->report_clock, 0);
+
+        } else if (type == "welcome") {
+            p2p_safelogpost(x, PD_NORMAL, "Connection ID: %s",
+                            data["id"].get<std::string>().substr(0, 6).c_str());
+            x->local_peer_id = data["id"].get<std::string>();
+        }
+    });
+
+    x->shared_ws->start();
+
+    p2p_safelogpost(x, PD_NORMAL, "Connecting...");
+    if (x->wants_stream) {
+        p2p_stream(x, 1);
+    }
 }
 
 // ─────────────────────────────────────
 static void p2p_channel(p2p_tilde *x, t_symbol *user, t_float f) {
-    if (f > x->max_channels || f < 1) {
-        safelogpost(x, PD_ERROR, "Invalid channel. Valid channels are 1-%d.", x->max_channels);
+    if (f > x->max_out_channels || f < 1) {
+        p2p_safelogpost(x, PD_ERROR, "Invalid channel. Valid channels are 1-%d.",
+                        x->max_out_channels);
         return;
     }
     if (!x->fixchannels) {
-        safelogpost(x, PD_ERROR, "Create the object with '-f' to use setchannel");
+        p2p_safelogpost(x, PD_ERROR, "Create the object with '-f' to use setchannel");
         return;
     }
 
     x->peers_channels[user->s_name] = (int)f - 1;
-    safelogpost(x, PD_NORMAL, "User: %s -> Ch: %d", user->s_name, (int)f);
+    p2p_safelogpost(x, PD_NORMAL, "User: %s -> Ch: %d", user->s_name, (int)f);
 }
 
 // ─────────────────────────────────────
@@ -561,7 +590,7 @@ static void p2p_report(p2p_tilde *x) {
 }
 
 // ─────────────────────────────────────
-static t_int *p2p_tilde_perform(t_int *w) {
+static t_int *p2p_perform(t_int *w) {
     auto *x = (p2p_tilde *)w[1];
     auto *in = (t_sample *)w[2];
     int n = (int)w[3];
@@ -650,18 +679,18 @@ static t_int *p2p_tilde_perform(t_int *w) {
 
 // ─────────────────────────────────────
 static void p2p_dsp(p2p_tilde *x, t_signal **sp) {
-    int num_active = count_active_nodes(x);
+    int num_active = p2p_count_active_nodes(x);
 
     int num_outputs;
     if (x->multichannel) {
-        num_outputs = x->fixchannels ? x->max_channels : (num_active > 0 ? num_active : 1);
+        num_outputs = x->fixchannels ? x->max_out_channels : (num_active > 0 ? num_active : 1);
     } else {
         num_outputs = 1;
     }
     signal_setmultiout(&sp[1], num_outputs);
 
     // FIX Bug 3: pass 6 args so perform can safely read w[1]..w[6]
-    dsp_add(p2p_tilde_perform, 6,
+    dsp_add(p2p_perform, 6,
             x,            // w[1]
             sp[0]->s_vec, // w[2]  input
             sp[0]->s_n,   // w[3]  block size
@@ -676,45 +705,50 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
     p2p_tilde *x = (p2p_tilde *)pd_new(p2p_tilde_class);
     x->peer_connected = 0;
     x->multichannel = false;
-    x->max_channels = 8;
+    x->max_out_channels = 8;
     x->fixchannels = false;
 
     for (int i = 0; i < argc; i++) {
         if (argv[i].a_type == A_SYMBOL) {
-            if (strcmp(argv[i].a_w.w_symbol->s_name, "-o") == 0) {
+            const char *flag = atom_getsymbol(argv + i)->s_name;
+            if (strcmp(flag, "-o") == 0 && i + 1 < argc) {
                 x->multichannel = true;
-            } else if (strcmp(argv[i].a_w.w_symbol->s_name, "-f") == 0) {
+                x->max_out_channels = atom_getfloat(argv + i + 1);
+            } else if (strcmp(flag, "-i") == 0 && i + 1 < argc) {
+                x->max_in_channels = atom_getfloat(argv + i + 1);
+            } else if (strcmp(flag, "-f") == 0) {
                 x->fixchannels = true;
-                x->multichannel = true; // -f implies multichannel
+                x->multichannel = true;
             } else {
-                safelogpost(x, PD_NORMAL, "[p2p~] Unknown flag: %s", argv[i].a_w.w_symbol->s_name);
+                p2p_safelogpost(x, PD_ERROR, "Unknown flag: %s", argv[i].a_w.w_symbol->s_name);
             }
-        } else if (argv[i].a_type == A_FLOAT) {
-            x->max_channels = (int)argv[i].a_w.w_float;
         }
     }
 
-    x->nodes.reserve(x->max_channels);
-    for (int i = 0; i < x->max_channels; i++) {
+    x->nodes.reserve(x->max_out_channels);
+    for (int i = 0; i < x->max_out_channels; i++) {
         auto node = std::make_unique<P2PNode>();
         node->channel_index = i;
 
         int err;
         node->opus_enc = opus_encoder_create(node->sample_rate, 1, OPUS_APPLICATION_AUDIO, &err);
         if (err != OPUS_OK) {
-            safelogpost(x, PD_ERROR, "[p2p~] Opus encoder error for node %d: %d", i, err);
+            p2p_safelogpost(x, PD_ERROR, "Opus encoder error for node %d: %d", i, err);
             return nullptr;
         }
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_BITRATE(OPUS_BITRATE_MAX));
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_COMPLEXITY(10));
+        opus_encoder_ctl(node->opus_enc, OPUS_SET_APPLICATION(OPUS_APPLICATION_AUDIO));
         opus_encoder_ctl(node->opus_enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_PACKET_LOSS_PERC(0));
+
+        opus_encoder_ctl(node->opus_enc, OPUS_SET_BITRATE(192000)); // or 256000 stereo
+        opus_encoder_ctl(node->opus_enc, OPUS_SET_VBR(1));
+        opus_encoder_ctl(node->opus_enc, OPUS_SET_VBR_CONSTRAINT(1));
+        opus_encoder_ctl(node->opus_enc, OPUS_SET_COMPLEXITY(10));
         opus_encoder_ctl(node->opus_enc, OPUS_SET_INBAND_FEC(0));
         opus_encoder_ctl(node->opus_enc, OPUS_SET_DTX(0));
 
         node->opus_dec = opus_decoder_create(node->sample_rate, 1, &err);
         if (err != OPUS_OK) {
-            safelogpost(x, PD_ERROR, "[p2p~] Opus decoder error for node %d: %d", i, err);
+            p2p_safelogpost(x, PD_ERROR, "Opus decoder error for node %d: %d", i, err);
         }
 
         node->tx_thread = std::thread([node_ptr = node.get()]() {
@@ -724,7 +758,8 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
             unsigned char opus_payload[4000];
             uint16_t seq = 0;
             uint32_t rtp_timestamp = 0;
-            const uint32_t ssrc = 12345;
+            std::random_device rd;
+            uint32_t ssrc = rd();
             const uint8_t payload_type = 111;
             const uint32_t timestamp_increment = FRAME_SIZE;
 
@@ -772,10 +807,7 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
     x->out_signals = outlet_new(&x->x_obj, &s_signal);
     x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
     x->report_clock = clock_new(&x->x_obj, (t_method)p2p_report);
-    x->peers_channels.reserve(x->max_channels);
-
-    safelogpost(x, PD_NORMAL, "[p2p~] Created with %d channels, multichannel: %s, fixchannels: %s",
-                x->max_channels, x->multichannel ? "on" : "off", x->fixchannels ? "on" : "off");
+    x->peers_channels.reserve(x->max_out_channels);
 
     return x;
 }

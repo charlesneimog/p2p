@@ -1,199 +1,382 @@
 <!doctype html>
-<html lang="pt-br">
+<html lang="en">
     <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>P2P Simple - WebRTC</title>
+        <meta charset="utf-8" />
+        <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+        <title>P2P Networking Prototype</title>
+        <link href="https://fonts.googleapis.com" rel="preconnect" />
+        <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;display=swap"
+            rel="stylesheet"
+        />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+            rel="stylesheet"
+        />
+        <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+        <script id="tailwind-config">
+            tailwind.config = {
+                darkMode: "class",
+                theme: {
+                    extend: {
+                        colors: {
+                            "inverse-on-surface": "#f1f1f1",
+                            "surface-tint": "#5e5e5e",
+                            error: "#ba1a1a",
+                            "on-primary-fixed": "#1b1b1b",
+                            "on-surface": "#1b1b1b",
+                            "inverse-surface": "#303030",
+                            tertiary: "#000000",
+                            "surface-container": "#eeeeee",
+                            secondary: "#5e5e5e",
+                            "surface-variant": "#e2e2e2",
+                            "on-primary": "#ffffff",
+                            "on-background": "#1b1b1b",
+                            "primary-fixed-dim": "#c6c6c6",
+                            "error-container": "#ffdad6",
+                            "tertiary-container": "#1b1b1b",
+                            "on-secondary-fixed-variant": "#464747",
+                            "on-error-container": "#93000a",
+                            "surface-bright": "#f9f9f9",
+                            background: "#f9f9f9",
+                            "surface-container-lowest": "#ffffff",
+                            "on-surface-variant": "#4c4546",
+                            "on-tertiary-fixed-variant": "#474747",
+                            "on-tertiary-container": "#848484",
+                            "secondary-container": "#e1dfdf",
+                            "surface-container-highest": "#e2e2e2",
+                            "on-primary-container": "#848484",
+                            "surface-container-high": "#e8e8e8",
+                            surface: "#f9f9f9",
+                            "tertiary-fixed-dim": "#c6c6c6",
+                            "on-secondary-fixed": "#1b1c1c",
+                            "secondary-fixed": "#e4e2e2",
+                            "on-primary-fixed-variant": "#474747",
+                            "secondary-fixed-dim": "#c7c6c6",
+                            "surface-dim": "#dadada",
+                            "on-error": "#ffffff",
+                            "inverse-primary": "#c6c6c6",
+                            "on-secondary-container": "#636262",
+                            primary: "#000000",
+                            "tertiary-fixed": "#e2e2e2",
+                            outline: "#7e7576",
+                            "surface-container-low": "#f3f3f3",
+                            "primary-container": "#1b1b1b",
+                            "outline-variant": "#cfc4c5",
+                            "on-tertiary": "#ffffff",
+                            "primary-fixed": "#e2e2e2",
+                            "on-tertiary-fixed": "#1b1b1b",
+                            "on-secondary": "#ffffff",
+                        },
+                        borderRadius: {
+                            DEFAULT: "0.125rem",
+                            lg: "0.25rem",
+                            xl: "0.5rem",
+                            full: "0.75rem",
+                        },
+                        spacing: {
+                            gutter: "2rem",
+                            "margin-page": "4rem",
+                            "section-gap": "8rem",
+                            "element-gap": "1rem",
+                            "margin-mobile": "1.5rem",
+                        },
+                        fontFamily: {
+                            "headline-lg-mobile": ["Hanken Grotesk"],
+                            display: ["Hanken Grotesk"],
+                            "headline-md": ["Hanken Grotesk"],
+                            "label-md": ["Hanken Grotesk"],
+                            "body-lg": ["Hanken Grotesk"],
+                            "label-sm": ["Hanken Grotesk"],
+                            "headline-lg": ["Hanken Grotesk"],
+                            "body-md": ["Hanken Grotesk"],
+                        },
+                    },
+                },
+            };
+        </script>
         <style>
-            body {
-                font-family:
-                    system-ui,
-                    -apple-system,
-                    sans-serif;
-                max-width: 600px;
-                margin: 0 auto;
-                padding: 20px;
-                background: #f0f0f0;
+            .material-symbols-outlined {
+                font-variation-settings:
+                    "FILL" 0,
+                    "wght" 400,
+                    "GRAD" 0,
+                    "opsz" 24;
             }
-            .card {
-                background: white;
-                border-radius: 16px;
-                padding: 20px;
-                margin-bottom: 16px;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            .material-symbols-outlined[data-weight="fill"] {
+                font-variation-settings:
+                    "FILL" 1,
+                    "wght" 400,
+                    "GRAD" 0,
+                    "opsz" 24;
             }
-            input,
-            button {
-                padding: 10px 16px;
-                font-size: 14px;
-                border: 1px solid #ddd;
-                border-radius: 8px;
-                margin: 4px;
+
+            /* Custom Scrollbar for the console */
+            #console-log::-webkit-scrollbar {
+                width: 8px;
             }
-            button {
-                background: #667eea;
-                color: white;
-                cursor: pointer;
-                border: none;
+            #console-log::-webkit-scrollbar-track {
+                background: #303030;
+                border-radius: 4px;
             }
-            button:disabled {
-                background: #ccc;
-            }
-            .status {
-                padding: 8px;
-                border-radius: 8px;
-                margin-top: 8px;
-                font-size: 12px;
-            }
-            .connected {
-                background: #d4edda;
-                color: #155724;
-            }
-            .disconnected {
-                background: #f8d7da;
-                color: #721c24;
-            }
-            .connecting {
-                background: #fff3cd;
-                color: #856404;
-            }
-            .peer {
-                display: inline-block;
-                padding: 8px 12px;
-                margin: 4px;
-                background: #e0e0e0;
-                border-radius: 20px;
-                font-size: 12px;
-            }
-            .peer.online {
-                background: #4caf50;
-                color: white;
-            }
-            .log {
-                background: #1e1e1e;
-                color: #0f0;
-                padding: 12px;
-                border-radius: 8px;
-                font-family: monospace;
-                font-size: 11px;
-                height: 200px;
-                overflow-y: auto;
-            }
-            .log-entry {
-                padding: 2px 0;
-                border-bottom: 1px solid #333;
+            #console-log::-webkit-scrollbar-thumb {
+                background: #5e5e5e;
+                border-radius: 4px;
             }
         </style>
     </head>
-    <body>
-        <div class="card">
-            <h3>P2P Prototype</h3>
-            <div>
-                <input type="text" id="room" placeholder="Sala" value="demo" />
-                <input type="text" id="name" placeholder="Seu nome" value="User" />
-                <button id="connectBtn">Connect</button>
-                <button id="disconnectBtn" disabled>Desconect</button>
-            </div>
-            <div id="status" class="status disconnected">Desconected</div>
-        </div>
+    <body
+        class="bg-background text-on-background min-h-screen font-body-md text-body-md antialiased selection:bg-surface-variant selection:text-on-background flex flex-col items-center"
+    >
+        <main class="w-full max-w-[600px] px-margin-mobile md:px-0 py-12 flex flex-col gap-element-gap">
+            <section
+                class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-6 shadow-sm"
+            >
+                <header>
+                    <h2 class="font-headline-md text-headline-md text-on-background">P2P Prototype</h2>
+                </header>
+                <div class="flex flex-col sm:flex-row gap-4">
+                    <div class="flex-1 flex flex-col gap-2">
+                        <label class="font-label-md text-label-md text-secondary" for="room-name">Room name</label>
+                        <input
+                            class="w-full bg-surface-container-low border-b border-outline-variant px-4 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:border-primary focus:bg-surface transition-colors"
+                            id="room-name"
+                            placeholder="Enter room ID"
+                            type="text"
+                            value="node-alpha"
+                        />
+                    </div>
+                    <div class="flex-1 flex flex-col gap-2">
+                        <label class="font-label-md text-label-md text-secondary" for="user-name">User name</label>
+                        <input
+                            class="w-full bg-surface-container-low border-b border-outline-variant px-4 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:border-primary focus:bg-surface transition-colors"
+                            id="user-name"
+                            placeholder="Enter handle"
+                            type="text"
+                            value="user_7734"
+                        />
+                    </div>
+                </div>
+                <div class="flex gap-4 items-center">
+                    <button
+                        class="bg-primary text-on-primary font-label-md text-label-md px-6 py-2 rounded-lg hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        id="btn-connect"
+                    >
+                        Connect
+                    </button>
+                    <button
+                        class="bg-transparent border border-outline text-outline font-label-md text-label-md px-6 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled
+                        id="btn-disconnect"
+                    >
+                        Disconnect
+                    </button>
+                </div>
+                <div
+                    class="w-full bg-error-container text-on-error-container rounded-lg px-4 py-3 flex items-center gap-3 transition-colors duration-300"
+                    id="status-bar"
+                >
+                    <span class="material-symbols-outlined" data-icon="cloud_off" id="status-icon">cloud_off</span>
+                    <span class="font-label-md text-label-md" id="status-text">Disconnected</span>
+                </div>
+            </section>
 
-        <div class="card">
-            <h4>Peers</h4>
-            <div id="peersList">None</div>
-        </div>
+            <section
+                class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-4 shadow-sm"
+            >
+                <header class="flex justify-between items-center">
+                    <h2 class="font-headline-md text-headline-md text-on-background">Peers</h2>
+                    <span
+                        class="font-label-sm text-label-sm text-secondary px-3 py-1 bg-surface-container rounded-full"
+                        id="peer-count"
+                        >0 Connected</span
+                    >
+                </header>
+                <div class="flex flex-wrap gap-3 min-h-[3rem] items-center" id="peer-list">
+                    <p class="font-body-md text-body-md text-secondary italic w-full text-center" id="peer-placeholder">
+                        No peers connected
+                    </p>
+                </div>
+            </section>
 
-        <div class="card">
-            <h4>Mensagens</h4>
-            <button id="sendMsgBtn">Send "Hello P2P!"</button>
-            <button id="initAudioBtn">Init Mic</button>
-            <div class="log" id="log"></div>
-        </div>
+            <section
+                class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-6 shadow-sm"
+            >
+                <header>
+                    <h2 class="font-headline-md text-headline-md text-on-background">Messages</h2>
+                </header>
+                <div class="flex gap-4">
+                    <button
+                        class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all opacity-50 cursor-not-allowed"
+                        disabled
+                        id="btn-test-msg"
+                    >
+                        Send Test Message
+                    </button>
+                    <button
+                        class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all flex items-center gap-2"
+                        id="btn-init-mic"
+                    >
+                        <span class="material-symbols-outlined text-[18px]" data-icon="mic">mic</span>
+                        Initialize Mic
+                    </button>
+                </div>
+                <div
+                    class="w-full bg-inverse-surface rounded-xl border border-outline-variant p-4 h-64 overflow-y-auto flex flex-col-reverse gap-1 shadow-inner"
+                    id="console-log"
+                >
+                    <div class="text-inverse-on-surface opacity-50 font-label-sm text-label-sm py-1"></div>
+                </div>
+            </section>
+        </main>
 
         <script src="p2p.js"></script>
         <script>
-            // Elementos DOM
-            const roomInput = document.getElementById("room");
-            const nameInput = document.getElementById("name");
-            const connectBtn = document.getElementById("connectBtn");
-            const disconnectBtn = document.getElementById("disconnectBtn");
-            const statusDiv = document.getElementById("status");
-            const peersListDiv = document.getElementById("peersList");
-            const logDiv = document.getElementById("log");
-            const sendMsgBtn = document.getElementById("sendMsgBtn");
-            const initAudioBtn = document.getElementById("initAudioBtn");
+            const roomInput = document.getElementById("room-name");
+            const nameInput = document.getElementById("user-name");
+            const numero = Math.floor(Math.random() * 10000); // 0 a 9999
+            const numeroFormatado = numero.toString().padStart(4, "0"); // ex: "0042"
+            nameInput.value = "user_" + numeroFormatado;
+
+            const connectBtn = document.getElementById("btn-connect");
+            const disconnectBtn = document.getElementById("btn-disconnect");
+            const statusDiv = document.getElementById("status-bar");
+            const statusIcon = document.getElementById("status-icon");
+            const statusText = document.getElementById("status-text");
+            const peersListDiv = document.getElementById("peer-list");
+            const peerCount = document.getElementById("peer-count");
+            const logDiv = document.getElementById("console-log");
+            const sendMsgBtn = document.getElementById("btn-test-msg");
+            const initAudioBtn = document.getElementById("btn-init-mic");
 
             let network = null;
             let uiRefreshInterval = null;
 
-            // Funcoes de Auxilio da UI
+            // Strict DOM Modification
             function addLog(msg, type = "info") {
                 const entry = document.createElement("div");
-                entry.className = "log-entry";
-                entry.style.color = type === "error" ? "#f00" : type === "success" ? "#0f0" : "#fff";
-                entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+                entry.className = "font-mono text-sm py-1 border-b border-[#404040] last:border-0 ";
+
+                if (type === "error") {
+                    entry.className += "text-[#ffb4ab] font-medium"; // Error tone for dark surface
+                } else if (type === "success") {
+                    entry.className += "text-[#81c784] font-medium"; // Success tone
+                } else {
+                    entry.className += "text-inverse-on-surface";
+                }
+
+                entry.textContent = `[${new Date().toLocaleTimeString("en-US", { hour12: false })}] ${msg}`;
                 logDiv.insertBefore(entry, logDiv.firstChild);
             }
 
             function updateStatus(text, state) {
-                statusDiv.textContent = text;
-                statusDiv.className = `status ${state}`;
+                statusText.textContent = text;
+                // Reset to baseline container classes
+                statusDiv.className =
+                    "w-full rounded-lg px-4 py-3 flex items-center gap-3 transition-colors duration-300 ";
+
+                switch (state) {
+                    case "disconnected":
+                        statusDiv.className += "bg-error-container text-on-error-container";
+                        statusIcon.textContent = "cloud_off";
+                        break;
+                    case "connecting":
+                        statusDiv.className += "bg-surface-variant text-on-surface-variant animate-pulse";
+                        statusIcon.textContent = "sync";
+                        break;
+                    case "connected":
+                        statusDiv.className += "bg-primary-container text-on-primary-container";
+                        statusIcon.textContent = "cloud_done";
+                        break;
+                }
             }
 
             function renderPeers() {
                 if (!network || network.peers.size === 0) {
-                    peersListDiv.innerHTML = "Room is empty";
+                    peersListDiv.innerHTML =
+                        '<p class="font-body-md text-body-md text-secondary w-full text-center py-2 italic" id="peer-placeholder">No peers connected</p>';
+                    peerCount.textContent = "0 Connected";
                     return;
                 }
 
+                peerCount.textContent = `${network.peers.size} Connected`;
                 let html = "";
+
                 for (const [id, peer] of network.peers.entries()) {
                     const isOnline = peer.dc?.readyState === "open";
-                    html += `<div class="peer ${isOnline ? "online" : ""}">
-                    ${peer.name}
-                </div>`;
+                    const statusColor = isOnline ? "bg-[#81c784]" : "bg-error";
+
+                    html += `
+                    <div class="flex items-center gap-2 bg-surface-container px-3 py-1.5 rounded-full border border-outline-variant shadow-sm transition-all hover:bg-surface-container-high">
+                        <div class="relative flex items-center justify-center">
+                            <span class="material-symbols-outlined text-[20px] text-on-surface">account_circle</span>
+                            <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${statusColor} border-2 border-surface-container"></span>
+                        </div>
+                        <span class="font-label-md text-on-surface">${peer.name}</span>
+                    </div>`;
                 }
                 peersListDiv.innerHTML = html;
             }
 
-            // Inicializacao e Eventos de Input
+            // Connection Logic
             connectBtn.onclick = () => {
                 const room = roomInput.value.trim();
                 const name = nameInput.value.trim();
+
                 if (!room || !name) {
-                    addLog("[Erro] Preencha sala e nome", "error");
+                    addLog("Validation Error: Room and Name required.", "error");
                     return;
                 }
 
-                updateStatus("Conectando...", "connecting");
+                updateStatus("Connecting...", "connecting");
+
+                if (typeof SimpleP2P === "undefined") {
+                    addLog("Fatal Error: SimpleP2P class not found in p2p.js", "error");
+                    updateStatus("Disconnected", "disconnected");
+                    return;
+                }
+
                 network = new SimpleP2P(room, name);
 
                 network.onLog = (msg) => console.log(msg);
-                network.onError = (msg) => addLog(`[Erro] ${msg}`, "error");
+                network.onError = (msg) => addLog(`System Error: ${msg}`, "error");
 
                 network.onConnect = (myId) => {
-                    updateStatus("Conectado", "connected");
+                    updateStatus(`Connected as ${name}`, "connected");
                     connectBtn.disabled = true;
                     disconnectBtn.disabled = false;
-                    addLog(`[Sucesso] Conectado ao servidor de sinalizacao. ID: ${myId.substring(0, 8)}`, "success");
+
+                    // Unlock Messaging UI
+                    sendMsgBtn.disabled = false;
+                    sendMsgBtn.classList.remove("opacity-50", "cursor-not-allowed");
+
+                    addLog(`Signaling server connected. Hash ID: ${myId.substring(0, 8)}`, "success");
                     renderPeers();
+
                     uiRefreshInterval = setInterval(() => {
                         if (network && network.peers.size > 0) renderPeers();
                     }, 1000);
                 };
 
                 network.onDisconnect = () => {
-                    updateStatus("Desconectado", "disconnected");
+                    updateStatus("Disconnected", "disconnected");
                     connectBtn.disabled = false;
                     disconnectBtn.disabled = true;
+
+                    // Lock Messaging UI
+                    sendMsgBtn.disabled = true;
+                    sendMsgBtn.classList.add("opacity-50", "cursor-not-allowed");
                     initAudioBtn.disabled = false;
+
                     if (uiRefreshInterval) clearInterval(uiRefreshInterval);
                     renderPeers();
-                    addLog("[Info] Desconectado", "error");
+                    addLog("Network connection terminated.", "error");
                     network = null;
                 };
 
                 network.onPeerJoin = (peerId, peerName) => {
-                    addLog(`[Info] ${peerName} entrou na sala`);
+                    addLog(`Peer joined: ${peerName}`, "info");
                     renderPeers();
                 };
 
@@ -204,25 +387,25 @@
                         audioElement.srcObject = null;
                         audioElement.remove();
                     }
-                    addLog(`[Info] Um usuario saiu`);
+                    addLog("Peer disconnected from room.", "info");
                     renderPeers();
                 };
 
                 network.onMessage = (peerId, data) => {
                     const peer = network.peers.get(peerId);
-                    const peerName = peer ? peer.name : "Desconhecido";
+                    const peerName = peer ? peer.name : "Unknown";
                     if (data.type === "message") {
-                        addLog(`[Msg] ${peerName}: ${data.text}`, "success");
+                        addLog(`${peerName}: ${data.text}`, "success");
                     } else {
-                        addLog(`[Dados] Dados recebidos de ${peerName}: ${JSON.stringify(data)}`);
+                        addLog(`Data chunk received from ${peerName}.`, "info");
                     }
                 };
 
                 network.onTrack = (peerId, remoteStream) => {
                     const peer = network.peers.get(peerId);
-                    const peerName = peer ? peer.name : "Alguem";
+                    const peerName = peer ? peer.name : "Unknown";
 
-                    addLog(`[Audio] Recebendo audio de: ${peerName}`, "success");
+                    addLog(`Audio stream established from: ${peerName}`, "success");
 
                     let audioElement = document.getElementById(`audio-${peerId}`);
                     if (!audioElement) {
@@ -243,14 +426,14 @@
 
             sendMsgBtn.onclick = () => {
                 if (!network) return;
-                const payload = { type: "message", text: "Ola P2P!" };
+                const payload = { type: "message", text: "Hello P2P Network!" };
                 network.broadcast(payload);
-                addLog(`[Msg] Voce: ${payload.text}`, "info");
+                addLog(`You: ${payload.text}`, "info");
             };
 
             initAudioBtn.onclick = async () => {
                 if (!network) {
-                    addLog("[Erro] Conecte-se a uma sala primeiro para transmitir audio.", "error");
+                    addLog("Context Error: Must join a room before initializing media devices.", "error");
                     return;
                 }
 
@@ -266,10 +449,10 @@
                     });
 
                     network.addMediaStream(stream);
-                    addLog("[Sucesso] Microfone ativado e adicionado a rede", "success");
+                    addLog("Hardware active. Mic added to local stream pool.", "success");
                     initAudioBtn.disabled = true;
                 } catch (err) {
-                    addLog(`[Erro] Erro ao acessar microfone: ${err.message}`, "error");
+                    addLog(`Hardware Error: ${err.message}`, "error");
                 }
             };
         </script>

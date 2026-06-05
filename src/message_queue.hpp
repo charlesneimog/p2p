@@ -7,7 +7,6 @@ struct p2p_tilde;
 
 // typedef void (*t_messfn)(t_pd *obj, void *data);
 struct p2p_tilde_messdata {
-    t_gobj *x;
     enum P2P_MESS {
         LOG,
         MESSAGE,
@@ -19,10 +18,12 @@ struct p2p_tilde_messdata {
 
 // ─────────────────────────────────────
 inline void p2p_tilde_mess(t_pd *obj, void *data) {
+    p2p_tilde *x = (p2p_tilde *)obj;
     p2p_tilde_messdata *d = (p2p_tilde_messdata *)data;
+
     switch (d->type) {
     case p2p_tilde_messdata::LOG: {
-        logpost(d->x, d->level, "[p2p~] %s", d->msg.c_str());
+        logpost(x, d->level, "[p2p~] %s", d->msg.c_str());
         break;
     }
     case p2p_tilde_messdata::MESSAGE: {
