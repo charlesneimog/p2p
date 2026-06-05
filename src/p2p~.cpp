@@ -83,6 +83,7 @@ struct p2p_tilde_messdata {
     };
     P2P_MESS type;
     std::string msg;
+    std::string user;
     t_loglevel level;
 };
 
@@ -90,21 +91,25 @@ struct p2p_tilde_messdata {
 struct p2p_tilde {
     t_object x_obj;
     t_sample x_f;
-    std::vector<std::unique_ptr<P2PNode>> nodes;
-    std::shared_ptr<ix::WebSocket> shared_ws;
     float peer_connected;
-    t_clock *report_clock;
-    t_outlet *out_signals;
-    t_outlet *out_msgs;
 
-    std::unordered_map<std::string, int> peers_channels;
-
-    std::string local_peer_id;
+    bool json;
     bool wants_stream;
     bool multichannel;
     bool fixchannels;
     int max_out_channels;
     int max_in_channels;
+
+    t_clock *report_clock;
+    t_outlet *out_signals;
+    t_outlet *out_msgs;
+
+    std::string local_peer_id;
+    std::vector<std::unique_ptr<P2PNode>> nodes;
+    std::shared_ptr<ix::WebSocket> shared_ws;
+    std::unordered_map<std::string, int> peers_channels;
+    std::string origin;
+    std::string jsonkey;
 };
 
 // ─────────────────────────────────────
@@ -118,6 +123,10 @@ static void p2p_tilde_mess(t_pd *obj, void *data) {
         break;
     }
     case p2p_tilde_messdata::MESSAGE: {
+        t_atom o[2];
+        SETSYMBOL(&o[0], gensym(d->user.c_str()));
+        SETSYMBOL(&o[1], gensym(d->msg.c_str()));
+        outlet_anything(x->out_msgs, gensym("json"), 2, o);
         break;
     }
     }
@@ -179,7 +188,6 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_calle
     config.iceServers.emplace_back("stun:stun.l.google.com:19302");
     node->pc = std::make_shared<rtc::PeerConnection>(config);
     node->remote_description_set = false;
-
     node->pc->onStateChange([x, node](rtc::PeerConnection::State state) {
         p2p_safelogpost(x, PD_DEBUG, "PC State for peer %s: %d", node->remote_peer_id.c_str(),
                         state);
@@ -190,7 +198,6 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_calle
             p2p_safelogpost(x, PD_NORMAL, "WebRTC Connected to peer '%s'!", node->user.c_str());
         }
     });
-
     node->pc->onSignalingStateChange([x, node](rtc::PeerConnection::SignalingState state) {
         p2p_safelogpost(x, PD_DEBUG, "Signaling State for peer %s: %d",
                         node->remote_peer_id.c_str(), state);
@@ -198,7 +205,6 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_calle
             node->making_offer = false;
         }
     });
-
     node->pc->onLocalDescription([x, node](rtc::Description description) {
         if (node->ws && node->ws->getReadyState() == ix::ReadyState::Open) {
             json msg = {
@@ -212,13 +218,7 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_calle
 
         p2p_safelogpost(x, PD_NORMAL, "Sending %s to %s", description.typeString().c_str(),
                         node->remote_peer_id.c_str());
-
-        // Do NOT clear making_offer here. This callback fires when we send the
-        // offer/answer, but the offer is still in-flight. The glare guard
-        // (making_offer && !is_polite) must stay true until the full exchange
-        // completes. Only onSignalingStateChange->Stable clears it.
     });
-
     node->pc->onLocalCandidate([x, node](rtc::Candidate candidate) {
         if (node->ws && node->ws->getReadyState() == ix::ReadyState::Open) {
             json msg;
@@ -241,12 +241,8 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_calle
                         node->remote_peer_id.c_str());
         return;
     }
-
-    p2p_safelogpost(x, PD_NORMAL, "Audio track added for peer '%s'", node->user.c_str());
-
     node->audio_track->setMediaHandler(std::make_shared<rtc::OpusRtpDepacketizer>());
     node->audio_track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
-
     node->audio_track->onFrame([x, node](rtc::binary data, rtc::FrameInfo) {
         if (!node->opus_dec) {
             return;
@@ -270,17 +266,48 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node, bool is_calle
         }
     });
 
+    // ─────────────────────────────────────
     if (is_caller) {
-        node->dc = node->pc->createDataChannel("pd_data");
-        node->dc->onOpen([x, node]() {
-            p2p_safelogpost(x, PD_NORMAL, "DataChannel open with peer '%s'", node->user.c_str());
+        std::shared_ptr<rtc::DataChannel> dc = node->pc->createDataChannel("data");
+        node->dc = dc;
+        dc->onOpen([x, node]() {
+            p2p_safelogpost(x, PD_DEBUG, "DataChannel open with peer '%s'", node->user.c_str());
+        });
+
+        dc->onMessage([x, node](std::variant<rtc::binary, std::string> data) {
+            std::string payload;
+            if (std::holds_alternative<std::string>(data)) {
+                payload = std::get<std::string>(data);
+            } else {
+                const auto &bin = std::get<rtc::binary>(data);
+                payload.assign(reinterpret_cast<const char *>(bin.data()), bin.size());
+            }
+            auto *d = new p2p_tilde_messdata();
+            d->type = p2p_tilde_messdata::MESSAGE;
+            d->msg = payload;
+            d->user = node->user;
+            pd_queue_mess(&pd_maininstance, &x->x_obj.te_g.g_pd, d, p2p_tilde_mess);
         });
     } else {
         node->pc->onDataChannel([x, node](std::shared_ptr<rtc::DataChannel> dc) {
             node->dc = dc;
-            node->dc->onOpen([x, node]() {
-                p2p_safelogpost(x, PD_NORMAL, "DataChannel open with peer %s",
-                                node->remote_peer_id.c_str());
+            dc->onOpen([x, node]() {
+                p2p_safelogpost(x, PD_DEBUG, "DataChannel open with peer '%s'", node->user.c_str());
+            });
+
+            dc->onMessage([x, node](std::variant<rtc::binary, std::string> data) {
+                std::string payload;
+                if (std::holds_alternative<std::string>(data)) {
+                    payload = std::get<std::string>(data);
+                } else {
+                    const auto &bin = std::get<rtc::binary>(data);
+                    payload.assign(reinterpret_cast<const char *>(bin.data()), bin.size());
+                }
+                auto *d = new p2p_tilde_messdata();
+                d->type = p2p_tilde_messdata::MESSAGE;
+                d->msg = payload;
+                d->user = node->user;
+                pd_queue_mess(&pd_maininstance, &x->x_obj.te_g.g_pd, d, p2p_tilde_mess);
             });
         });
     }
@@ -299,6 +326,11 @@ static void p2p_flush_pending_candidates(p2p_tilde *x, P2PNode *node) {
         }
     }
     node->pending_remote_candidates.clear();
+}
+
+// ─────────────────────────────────────
+static void p2p_origin(p2p_tilde *x, t_symbol *s) {
+    x->origin = s->s_name;
 }
 
 // ─────────────────────────────────────
@@ -352,7 +384,7 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
     std::string url = std::string(wss->s_name) + "/?room=" + std::string(room->s_name);
     x->shared_ws->setUrl(url);
     ix::WebSocketHttpHeaders headers;
-    headers["Origin"] = "https://charlesneimog.github.io";
+    headers["Origin"] = x->origin;
     x->shared_ws->setExtraHeaders(headers);
     std::string username = std::string(user->s_name);
 
@@ -583,10 +615,30 @@ static void p2p_message(p2p_tilde *x, t_symbol *, int argc, t_atom *argv) {
             text += " ";
         }
     }
+
+    json payload;
+    payload["type"] = "message";
+    payload["text"] = text;
+
+    std::string str = payload.dump(4);
     for (auto &node : x->nodes) {
         if (node->dc && node->dc->isOpen()) {
-            node->dc->send(text);
+            node->dc->send(str);
         }
+    }
+}
+
+// ─────────────────────────────────────
+static void p2p_json(p2p_tilde *x, t_symbol *json_str) {
+    try {
+        json message = json::parse(json_str->s_name);
+        if (message.contains(x->jsonkey)) {
+            std::string value = message[x->jsonkey];
+            post("%s", value.c_str());
+        }
+
+    } catch (const json::parse_error &e) {
+        p2p_safelogpost(x, PD_ERROR, "Invalid JSON: %s", e.what());
     }
 }
 
@@ -602,8 +654,8 @@ static void p2p_report(p2p_tilde *x) {
 static t_int *p2p_perform(t_int *w) {
     auto *x = (p2p_tilde *)w[1];
     auto *in = (t_sample *)w[2];
-    int n = (int)w[3];
-    auto *out_base = (t_sample *)w[4];
+    auto *out = (t_sample *)w[3];
+    int n = (int)w[4];
     int num_chans = (int)w[5];
 
     if (x->multichannel) {
@@ -617,7 +669,7 @@ static t_int *p2p_perform(t_int *w) {
 
         // Clear all output channels first
         for (int ch = 0; ch < num_chans; ch++) {
-            memset(out_base + ch * n, 0, n * sizeof(t_sample));
+            memset(out + ch * n, 0, n * sizeof(t_sample));
         }
 
         if (x->fixchannels) {
@@ -636,7 +688,7 @@ static t_int *p2p_perform(t_int *w) {
                 if (ch < 0 || ch >= num_chans) {
                     continue;
                 }
-                t_sample *out_ch = out_base + ch * n;
+                t_sample *out_ch = out + ch * n;
                 for (int i = 0; i < n; ++i) {
                     float s = 0.f;
                     node->receive_buffer.pop(s);
@@ -644,7 +696,6 @@ static t_int *p2p_perform(t_int *w) {
                 }
             }
         } else {
-            // Dynamic mode: assign channels sequentially in node order
             int ch = 0;
             for (auto &node : x->nodes) {
                 if (node->remote_peer_id.empty() || !node->pc) {
@@ -653,7 +704,7 @@ static t_int *p2p_perform(t_int *w) {
                 if (ch >= num_chans) {
                     break;
                 }
-                t_sample *out_ch = out_base + ch * n;
+                t_sample *out_ch = out + ch * n;
                 for (int i = 0; i < n; ++i) {
                     float s = 0.f;
                     node->receive_buffer.pop(s);
@@ -664,7 +715,6 @@ static t_int *p2p_perform(t_int *w) {
         }
 
     } else {
-        // Mono mix mode
         for (auto &node : x->nodes) {
             if (node->is_streaming && !node->remote_peer_id.empty() && node->pc) {
                 for (int i = 0; i < n; ++i) {
@@ -679,17 +729,20 @@ static t_int *p2p_perform(t_int *w) {
                 node->receive_buffer.pop(s);
                 mixed += s;
             }
-            out_base[i] = mixed;
+            out[i] = mixed;
         }
     }
 
-    return (w + 7); // FIX: 6 args passed → must skip 6 + 1 = 7 words
+    return (w + 6);
 }
 
 // ─────────────────────────────────────
 static void p2p_dsp(p2p_tilde *x, t_signal **sp) {
-    int num_active = p2p_count_active_nodes(x);
+    if (x->json) {
+        return;
+    }
 
+    int num_active = p2p_count_active_nodes(x);
     int num_outputs;
     if (x->multichannel) {
         num_outputs = x->fixchannels ? x->max_out_channels : (num_active > 0 ? num_active : 1);
@@ -697,16 +750,7 @@ static void p2p_dsp(p2p_tilde *x, t_signal **sp) {
         num_outputs = 1;
     }
     signal_setmultiout(&sp[1], num_outputs);
-
-    // FIX Bug 3: pass 6 args so perform can safely read w[1]..w[6]
-    dsp_add(p2p_perform, 6,
-            x,            // w[1]
-            sp[0]->s_vec, // w[2]  input
-            sp[0]->s_n,   // w[3]  block size
-            sp[1]->s_vec, // w[4]  output base
-            num_outputs,  // w[5]  channel count
-            0             // w[6]  padding (unused)
-    );
+    dsp_add(p2p_perform, 5, x, sp[0]->s_vec, sp[1]->s_vec, sp[0]->s_n, num_outputs);
 }
 
 // ─────────────────────────────────────
@@ -716,18 +760,37 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
     x->multichannel = false;
     x->max_out_channels = 8;
     x->fixchannels = false;
+    x->json = false;
 
+    bool user_had_other_flags = false;
     for (int i = 0; i < argc; i++) {
         if (argv[i].a_type == A_SYMBOL) {
             const char *flag = atom_getsymbol(argv + i)->s_name;
             if (strcmp(flag, "-o") == 0 && i + 1 < argc) {
                 x->multichannel = true;
                 x->max_out_channels = atom_getfloat(argv + i + 1);
+                user_had_other_flags = true;
             } else if (strcmp(flag, "-i") == 0 && i + 1 < argc) {
                 x->max_in_channels = atom_getfloat(argv + i + 1);
+                user_had_other_flags = true;
             } else if (strcmp(flag, "-f") == 0) {
                 x->fixchannels = true;
                 x->multichannel = true;
+                user_had_other_flags = true;
+            } else if (strcmp(flag, "-json") == 0) {
+                if (i + 1 >= argc) {
+                    pd_error(x, "[p2p~] -json requires a key for processing");
+                    return nullptr;
+                }
+
+                if (user_had_other_flags) {
+                    pd_error(x, "[p2p~] Ignoring other flags");
+                }
+                x->json = true;
+                x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
+                x->jsonkey = atom_getsymbol(argv + i + 1)->s_name;
+                return x;
+
             } else {
                 p2p_safelogpost(x, PD_ERROR, "Unknown flag: %s", argv[i].a_w.w_symbol->s_name);
             }
@@ -839,6 +902,7 @@ static void p2p_free(p2p_tilde *x) {
 
 // ─────────────────────────────────────
 extern "C" void p2p_tilde_setup(void) {
+    post("[p2p~] by Charles K. Neimog %d.%d.%d", 0, 1, 0);
     ix::initNetSystem();
 
     p2p_tilde_class = class_new(gensym("p2p~"), (t_newmethod)p2p_new, (t_method)p2p_free,
@@ -850,7 +914,9 @@ extern "C" void p2p_tilde_setup(void) {
     class_addmethod(p2p_tilde_class, (t_method)p2p_connect, gensym("connect"), A_SYMBOL, A_SYMBOL,
                     A_SYMBOL, 0);
     class_addmethod(p2p_tilde_class, (t_method)p2p_disconnect, gensym("disconnect"), A_NULL, 0);
+    class_addmethod(p2p_tilde_class, (t_method)p2p_origin, gensym("origin"), A_SYMBOL, 0);
     class_addmethod(p2p_tilde_class, (t_method)p2p_message, gensym("message"), A_GIMME, 0);
     class_addmethod(p2p_tilde_class, (t_method)p2p_channel, gensym("setchannel"), A_SYMBOL, A_FLOAT,
                     0);
+    class_addsymbol(p2p_tilde_class, p2p_json);
 }

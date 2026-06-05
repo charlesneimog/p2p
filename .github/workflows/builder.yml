@@ -18,15 +18,9 @@ jobs:
         runs-on: ${{ matrix.machines }}
         strategy:
             matrix:
-                python:
-                    - python: "3.14"
-                      py_tag: "314"
                 precision: [32, 64]
                 machines: [macos-latest]
         steps:
-            - uses: actions/setup-python@v5
-              with:
-                  python-version: ${{ matrix.python.python }}
             - uses: actions/checkout@v4
               with:
                   submodules: recursive
@@ -40,12 +34,12 @@ jobs:
             - name: Build
               run: |
                   export CXXFLAGS="-I$(brew --prefix boost)/include"
-                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DPYVERSION=${{ matrix.python.python }} -DCMAKE_OSX_ARCHITECTURES="arm64"       -DBOOST_ROOT=$(brew --prefix boost) -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include
+                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64"       -DBOOST_ROOT=$(brew --prefix boost) -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include
                   cmake --build build --parallel
             - name: Upload ONNX Folder
               uses: actions/upload-artifact@v4
               with:
-                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-python${{ matrix.python.py_tag }}-pd${{ matrix.precision }}-${{ matrix.machines }}
+                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-pd${{ matrix.precision }}-${{ matrix.machines }}
                   path: build/${{env.LIBNAME}}
     linux:
         runs-on: ubuntu-latest
@@ -53,13 +47,7 @@ jobs:
             matrix:
                 arch: [amd64]
                 precision: [32, 64]
-                python:
-                    - python: "3.14"
-                      py_tag: "314"
         steps:
-            - uses: actions/setup-python@v5
-              with:
-                  python-version: ${{ matrix.python.python }}
             - uses: actions/checkout@v4
               with:
                   submodules: recursive
@@ -74,24 +62,24 @@ jobs:
               run: |
                   sudo apt install gcc-aarch64-linux-gnu -y
                   sudo apt install g++-aarch64-linux-gnu -y
-                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ -DPYVERSION=${{ matrix.python.python }}
+                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
             - name: Install arm gcc
               if: matrix.arch == 'arm'
               run: |
                   sudo apt install gcc-arm-linux-gnueabihf -y
                   sudo apt install g++-arm-linux-gnueabihf -y
-                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++ -DPYVERSION=${{ matrix.python.python }}
+                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++
             - name: Configure
               if: matrix.arch == 'amd64'
               run: |
-                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DPYVERSION=${{ matrix.python.python }}
+                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release
             - name: Build Object
               run: |
                   cmake --build build -- -j$(nproc)
             - name: Upload Object
               uses: actions/upload-artifact@v4
               with:
-                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-python${{ matrix.python.py_tag }}-pd${{ matrix.precision }}-linux-${{ matrix.arch }}
+                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-pd${{ matrix.precision }}-linux-${{ matrix.arch }}
                   path: build/${{env.LIBNAME}}
     windows:
         runs-on: windows-latest
@@ -100,13 +88,7 @@ jobs:
                 compiler: [mingw]
                 arch: [amd64]
                 precision: [32, 64]
-                python:
-                    - python: "3.14"
-                      py_tag: "314"
         steps:
-            - uses: actions/setup-python@v5
-              with:
-                  python-version: ${{ matrix.python.python }}
             - name: Checkout repository
               uses: actions/checkout@v4
               with:
@@ -131,12 +113,12 @@ jobs:
               shell: msys2 {0}
               if: matrix.compiler == 'mingw'
               run: |
-                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DPYVERSION=${{ matrix.python.python }}
+                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release 
                   cmake --build build --parallel
             - name: Upload
               uses: actions/upload-artifact@v4
               with:
-                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-python${{ matrix.python.py_tag }}-pd${{ matrix.precision }}-windows-${{ matrix.arch }}
+                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-pd${{ matrix.precision }}-windows-${{ matrix.arch }}
                   path: build/${{env.LIBNAME}}
 
     publish-release:
