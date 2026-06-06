@@ -83,3 +83,16 @@ target_link_libraries(
             datachannel-static
             opus)
 set_target_properties(opus PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    #add debug symbols to the target
+    target_compile_options(p2p_tilde PRIVATE -g)
+    
+endif()
+
+execute_process(
+    COMMAND brew --prefix boost
+    OUTPUT_VARIABLE BOOST_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+include_directories(${BOOST_PREFIX}/include)

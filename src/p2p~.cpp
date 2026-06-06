@@ -90,6 +90,16 @@ struct p2p_tilde_messdata {
 };
 
 // ─────────────────────────────────────
+struct p2p_state {
+    std::string local_peer_id;
+    std::vector<std::unique_ptr<P2PNode>> nodes;
+    std::shared_ptr<ix::WebSocket> shared_ws;
+    std::unordered_map<std::string, int> peers_channels;
+    std::string origin;
+    std::string jsonkey;
+};
+
+// ─────────────────────────────────────
 struct p2p_tilde {
     t_object x_obj;
     t_sample x_f;
@@ -106,12 +116,7 @@ struct p2p_tilde {
     t_outlet *out_signals;
     t_outlet *out_msgs;
 
-    std::string local_peer_id;
-    std::vector<std::unique_ptr<P2PNode>> nodes;
-    std::shared_ptr<ix::WebSocket> shared_ws;
-    std::unordered_map<std::string, int> peers_channels;
-    std::string origin;
-    std::string jsonkey;
+    p2p_state* state;
 };
 
 // ─────────────────────────────────────
@@ -139,7 +144,7 @@ static void p2p_tilde_mess(t_pd *obj, void *data) {
 
 // ─────────────────────────────────────
 static P2PNode *p2p_find_node_by_peer(p2p_tilde *x, const std::string &peer_id) {
-    for (auto &node : x->nodes) {
+    for (auto &node : x->state->nodes) {
         if (node->remote_peer_id == peer_id) {
             return node.get();
         }
@@ -149,7 +154,7 @@ static P2PNode *p2p_find_node_by_peer(p2p_tilde *x, const std::string &peer_id) 
 
 // ─────────────────────────────────────
 static P2PNode *p2p_tilde_find_free_node(p2p_tilde *x) {
-    for (auto &node : x->nodes) {
+    for (auto &node : x->state->nodes) {
         if (node->remote_peer_id.empty() && !node->pc) {
             return node.get();
         }
@@ -160,7 +165,7 @@ static P2PNode *p2p_tilde_find_free_node(p2p_tilde *x) {
 // ─────────────────────────────────────
 static int p2p_count_active_nodes(p2p_tilde *x) {
     int count = 0;
-    for (auto &node : x->nodes) {
+    for (auto &node : x->state->nodes) {
         if (!node->remote_peer_id.empty() && node->pc) {
             count++;
         }
@@ -332,13 +337,13 @@ static void p2p_flush_pending_candidates(p2p_tilde *x, P2PNode *node) {
 
 // ─────────────────────────────────────
 static void p2p_origin(p2p_tilde *x, t_symbol *s) {
-    x->origin = s->s_name;
+    x->state->origin = s->s_name;
 }
 
 // ─────────────────────────────────────
 static void p2p_stream(p2p_tilde *x, t_float f) {
     x->wants_stream = (f != 0);
-    for (auto &node : x->nodes) {
+    for (auto &node : x->state->nodes) {
         node->is_streaming = x->wants_stream;
     }
     p2p_safelogpost(x, PD_NORMAL, "Stream %s", x->wants_stream ? "active" : "paused");
@@ -346,7 +351,7 @@ static void p2p_stream(p2p_tilde *x, t_float f) {
 
 // ─────────────────────────────────────
 static void p2p_disconnect(p2p_tilde *x) {
-    for (auto &node : x->nodes) {
+    for (auto &node : x->state->nodes) {
         node->is_streaming = false;
         node->remote_description_set = false;
         if (node->dc) {
@@ -366,8 +371,8 @@ static void p2p_disconnect(p2p_tilde *x) {
         node->pending_remote_candidates.clear();
     }
 
-    if (x->shared_ws) {
-        x->shared_ws->stop();
+    if (x->state->shared_ws) {
+        x->state->shared_ws->stop();
     }
 
     x->peer_connected = 0;
@@ -377,23 +382,23 @@ static void p2p_disconnect(p2p_tilde *x) {
 
 // ─────────────────────────────────────
 static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *user) {
-    if (!x->shared_ws) {
-        x->shared_ws = std::make_shared<ix::WebSocket>();
+    if (!x->state->shared_ws) {
+        x->state->shared_ws = std::make_shared<ix::WebSocket>();
     } else {
         p2p_disconnect(x);
     }
 
     std::string url = std::string(wss->s_name) + "/?room=" + std::string(room->s_name);
-    x->shared_ws->setUrl(url);
+    x->state->shared_ws->setUrl(url);
     ix::WebSocketHttpHeaders headers;
-    headers["Origin"] = x->origin;
-    x->shared_ws->setExtraHeaders(headers);
+    headers["Origin"] = x->state->origin;
+    x->state->shared_ws->setExtraHeaders(headers);
     std::string username = std::string(user->s_name);
 
-    x->shared_ws->setOnMessageCallback([x, username, room](const ix::WebSocketMessagePtr &msg) {
+    x->state->shared_ws->setOnMessageCallback([x, username, room](const ix::WebSocketMessagePtr &msg) {
         if (msg->type == ix::WebSocketMessageType::Open) {
             json join = {{"type", "join"}, {"name", username}};
-            x->shared_ws->send(join.dump());
+            x->state->shared_ws->send(join.dump());
             p2p_safelogpost(x, PD_NORMAL, "Connected to the room: '%s'", room->s_name);
             return;
         }
@@ -423,7 +428,7 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
                                         : from_peer;
             node->user = peer_name;
             node->remote_peer_id = from_peer;
-            node->ws = x->shared_ws;
+            node->ws = x->state->shared_ws;
             node->is_polite = false;
             p2p_setup_webrtc_for_node(x, node, true);
             x->peer_connected = p2p_count_active_nodes(x);
@@ -441,7 +446,7 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
                     return;
                 }
                 node->remote_peer_id = from_peer;
-                node->ws = x->shared_ws;
+                node->ws = x->state->shared_ws;
                 node->is_polite = true;
                 p2p_setup_webrtc_for_node(x, node, false);
             }
@@ -561,7 +566,7 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
                 if (node) {
                     node->user = peer_name;
                     node->remote_peer_id = peer_id;
-                    node->ws = x->shared_ws;
+                    node->ws = x->state->shared_ws;
                     node->is_polite = false;
                     p2p_setup_webrtc_for_node(x, node, true);
                     node->making_offer = true;
@@ -576,11 +581,11 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
         } else if (type == "welcome") {
             p2p_safelogpost(x, PD_NORMAL, "Connection ID: %s",
                             data["id"].get<std::string>().substr(0, 6).c_str());
-            x->local_peer_id = data["id"].get<std::string>();
+            x->state->local_peer_id = data["id"].get<std::string>();
         }
     });
 
-    x->shared_ws->start();
+    x->state->shared_ws->start();
 
     p2p_safelogpost(x, PD_NORMAL, "Connecting...");
     if (x->wants_stream) {
@@ -600,7 +605,7 @@ static void p2p_channel(p2p_tilde *x, t_symbol *user, t_float f) {
         return;
     }
 
-    x->peers_channels[user->s_name] = (int)f - 1;
+    x->state->peers_channels[user->s_name] = (int)f - 1;
     p2p_safelogpost(x, PD_NORMAL, "User: %s -> Ch: %d", user->s_name, (int)f);
 }
 
@@ -623,7 +628,7 @@ static void p2p_message(p2p_tilde *x, t_symbol *, int argc, t_atom *argv) {
     payload["text"] = text;
 
     std::string str = payload.dump(4);
-    for (auto &node : x->nodes) {
+    for (auto &node : x->state->nodes) {
         if (node->dc && node->dc->isOpen()) {
             node->dc->send(str);
         }
@@ -641,8 +646,8 @@ static void p2p_json(p2p_tilde *x, t_symbol *s, int argc, t_atom *argv) {
         post("mesage");
         t_symbol *json_str = atom_getsymbol(argv);
         json message = json::parse(json_str->s_name);
-        if (message.contains(x->jsonkey)) {
-            std::string value = message[x->jsonkey];
+        if (message.contains(x->state->jsonkey)) {
+            std::string value = message[x->state->jsonkey];
             std::vector<t_atom> atoms;
             char *buf = strdup(value.c_str());
             char *tok = strtok(buf, " ");
@@ -684,7 +689,7 @@ static t_int *p2p_perform(t_int *w) {
     int num_chans = (int)w[5];
 
     if (x->multichannel) {
-        for (auto &node : x->nodes) {
+        for (auto &node : x->state->nodes) {
             if (node->is_streaming && !node->remote_peer_id.empty() && node->pc) {
                 for (int i = 0; i < n; ++i) {
                     node->send_buffer.push(in[i]);
@@ -698,12 +703,12 @@ static t_int *p2p_perform(t_int *w) {
         }
 
         if (x->fixchannels) {
-            for (auto &node : x->nodes) {
+            for (auto &node : x->state->nodes) {
                 if (node->remote_peer_id.empty() || !node->pc) {
                     continue;
                 }
-                auto it = x->peers_channels.find(node->user);
-                if (it == x->peers_channels.end()) {
+                auto it = x->state->peers_channels.find(node->user);
+                if (it == x->state->peers_channels.end()) {
                     float dummy;
                     while (node->receive_buffer.pop(dummy)) {
                     }
@@ -722,7 +727,7 @@ static t_int *p2p_perform(t_int *w) {
             }
         } else {
             int ch = 0;
-            for (auto &node : x->nodes) {
+            for (auto &node : x->state->nodes) {
                 if (node->remote_peer_id.empty() || !node->pc) {
                     continue;
                 }
@@ -740,7 +745,7 @@ static t_int *p2p_perform(t_int *w) {
         }
 
     } else {
-        for (auto &node : x->nodes) {
+        for (auto &node : x->state->nodes) {
             if (node->is_streaming && !node->remote_peer_id.empty() && node->pc) {
                 for (int i = 0; i < n; ++i) {
                     node->send_buffer.push(in[i]);
@@ -749,7 +754,7 @@ static t_int *p2p_perform(t_int *w) {
         }
         for (int i = 0; i < n; ++i) {
             float mixed = 0.f;
-            for (auto &node : x->nodes) {
+            for (auto &node : x->state->nodes) {
                 float s = 0.f;
                 node->receive_buffer.pop(s);
                 mixed += s;
@@ -786,6 +791,7 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
     x->max_out_channels = 8;
     x->fixchannels = false;
     x->json = false;
+    x->state = new p2p_state();
 
     bool user_had_other_flags = false;
     for (int i = 0; i < argc; i++) {
@@ -813,7 +819,7 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
                 }
                 x->json = true;
                 x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
-                x->jsonkey = atom_getsymbol(argv + i + 1)->s_name;
+                x->state->jsonkey = atom_getsymbol(argv + i + 1)->s_name;
                 return x;
 
             } else {
@@ -822,7 +828,7 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
         }
     }
 
-    x->nodes.reserve(x->max_out_channels);
+    x->state->nodes.reserve(x->max_out_channels);
     for (int i = 0; i < x->max_out_channels; i++) {
         auto node = std::make_unique<P2PNode>();
         node->channel_index = i;
@@ -898,35 +904,36 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
             }
         });
 
-        x->nodes.push_back(std::move(node));
+        x->state->nodes.push_back(std::move(node));
     }
     if (x->max_out_channels < 1 || x->max_out_channels > 1000) {
         pd_error(x, "[p2p~] Min for output is 1 and max is 1000");
         x->max_out_channels = 8;
     }
 
+    post("[p2p~] Max output channels: %d", x->max_out_channels);
     x->out_signals = outlet_new(&x->x_obj, &s_signal);
     x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
     x->report_clock = clock_new(&x->x_obj, (t_method)p2p_report);
-    x->peers_channels.reserve(x->max_out_channels);
-
+    x->state->peers_channels.reserve(x->max_out_channels);
     return x;
 }
 
 // ─────────────────────────────────────
 static void p2p_free(p2p_tilde *x) {
-    for (auto &node : x->nodes) {
+    for (auto &node : x->state->nodes) {
         node->thread_running = false;
         if (node->pc) {
             node->pc->close();
         }
     }
-    if (x->shared_ws) {
-        x->shared_ws->stop();
+    if (x->state->shared_ws) {
+        x->state->shared_ws->stop();
     }
     if (x->report_clock) {
         clock_free(x->report_clock);
     }
+    delete x->state;
 }
 
 // ─────────────────────────────────────
