@@ -900,6 +900,10 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
 
         x->nodes.push_back(std::move(node));
     }
+    if (x->max_out_channels < 1 || x->max_out_channels > 1000) {
+        pd_error(x, "[p2p~] Min for output is 1 and max is 1000");
+        x->max_out_channels = 8;
+    }
 
     x->out_signals = outlet_new(&x->x_obj, &s_signal);
     x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
