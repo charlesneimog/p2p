@@ -22,6 +22,8 @@
 #include <boost/lockfree/spsc_queue.hpp>
 
 using json = nlohmann::json;
+
+static t_class *p2p_class;
 static t_class *p2p_tilde_class;
 
 // ─────────────────────────────────────
@@ -629,12 +631,35 @@ static void p2p_message(p2p_tilde *x, t_symbol *, int argc, t_atom *argv) {
 }
 
 // ─────────────────────────────────────
-static void p2p_json(p2p_tilde *x, t_symbol *json_str) {
+static void p2p_json(p2p_tilde *x, t_symbol *s, int argc, t_atom *argv) {
+    if (argc == 0) {
+        pd_error(x, "[p2p~] Message is empty");
+        return;
+    }
+
     try {
+        post("mesage");
+        t_symbol *json_str = atom_getsymbol(argv);
         json message = json::parse(json_str->s_name);
         if (message.contains(x->jsonkey)) {
             std::string value = message[x->jsonkey];
-            post("%s", value.c_str());
+            std::vector<t_atom> atoms;
+            char *buf = strdup(value.c_str());
+            char *tok = strtok(buf, " ");
+            while (tok) {
+                t_atom a;
+                char *endptr;
+                double f = strtod(tok, &endptr);
+                if (*endptr == '\0') {
+                    SETFLOAT(&a, f);
+                } else {
+                    SETSYMBOL(&a, gensym(tok));
+                }
+                atoms.push_back(a);
+                tok = strtok(nullptr, " ");
+            }
+            outlet_list(x->out_msgs, &s_list, static_cast<int>(atoms.size()), atoms.data());
+            free(buf);
         }
 
     } catch (const json::parse_error &e) {
@@ -918,5 +943,5 @@ extern "C" void p2p_tilde_setup(void) {
     class_addmethod(p2p_tilde_class, (t_method)p2p_message, gensym("message"), A_GIMME, 0);
     class_addmethod(p2p_tilde_class, (t_method)p2p_channel, gensym("setchannel"), A_SYMBOL, A_FLOAT,
                     0);
-    class_addsymbol(p2p_tilde_class, p2p_json);
+    class_addmethod(p2p_tilde_class, (t_method)p2p_json, gensym("json"), A_GIMME, 0);
 }
