@@ -116,7 +116,7 @@ struct p2p_tilde {
     t_outlet *out_signals;
     t_outlet *out_msgs;
 
-    p2p_state* state;
+    p2p_state *state;
 };
 
 // ─────────────────────────────────────
@@ -395,7 +395,8 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
     x->state->shared_ws->setExtraHeaders(headers);
     std::string username = std::string(user->s_name);
 
-    x->state->shared_ws->setOnMessageCallback([x, username, room](const ix::WebSocketMessagePtr &msg) {
+    x->state->shared_ws->setOnMessageCallback([x, username,
+                                               room](const ix::WebSocketMessagePtr &msg) {
         if (msg->type == ix::WebSocketMessageType::Open) {
             json join = {{"type", "join"}, {"name", username}};
             x->state->shared_ws->send(join.dump());
@@ -410,10 +411,9 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
         json data = json::parse(msg->str);
         std::string type = data["type"];
         std::string from_peer = data.contains("from") ? data["from"].get<std::string>() : "";
-        p2p_safelogpost(x, PD_DEBUG, "Received: %s from %s", type.c_str(), from_peer.c_str());
+        logpost(x, PD_DEBUG, "%s", data.dump(3).c_str());
 
         if (type == "peer-joined") {
-            logpost(x, PD_DEBUG, "%s", data.dump(3).c_str());
 
             // WORK FOR BROWSER -> PD and PD -> TO BROWSER
             P2PNode *node = p2p_tilde_find_free_node(x);
@@ -438,6 +438,7 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
 
         } else if (type == "offer") {
             P2PNode *node = p2p_find_node_by_peer(x, from_peer);
+            logpost(x, PD_ERROR, "%s", data.dump(4).c_str());
             if (!node) {
                 node = p2p_tilde_find_free_node(x);
                 if (!node) {

@@ -31,13 +31,18 @@ class SimpleP2P {
         for (const [id, peer] of this.peers.entries()) {
             if (peer.pc && peer.pc.connectionState === "connected") {
                 const senders = peer.pc.getSenders();
-                stream.getTracks().forEach((track) => {
-                    const alreadyAdded = senders.find((s) => s.track === track);
-                    if (!alreadyAdded) {
-                        peer.pc.addTrack(track, stream);
-                        // onnegotiationneeded will fire automatically — no manual _renegotiate needed
+                const hasAudio = senders.some((s) => s.track && s.track.kind === "audio");
+
+                if (!hasAudio) {
+                    const audioTrack = stream.getAudioTracks()[0];
+                    if (audioTrack) {
+                        peer.pc.addTrack(audioTrack, stream);
+                        this.onLog(`Added late audio track to existing connection with ${id}`);
+                        // Trigger renegotiation
+                        peer.makingOffer = false; // Reset flag to allow negotiation
+                        peer.pc.onnegotiationneeded(); // Force negotiation
                     }
-                });
+                }
             }
         }
     }
@@ -69,22 +74,30 @@ class SimpleP2P {
 
                 case "existing-peers":
                     if (msg.peers && msg.peers.length > 0) {
-                        msg.peers.forEach((p) => {
+                        for (const p of msg.peers) {
                             if (!this.peers.has(p.id)) {
                                 this.peers.set(p.id, { name: p.name, pc: null, dc: null, makingOffer: false });
+                                // Only initiate if we're the caller
+                                if (this._shouldBeCaller(p.id)) {
+                                    await this._initiateConnection(p.id);
+                                }
                             }
-                        });
+                        }
                     }
                     break;
-
                 case "peer-joined":
                     if (!this.peers.has(msg.from)) {
                         this.peers.set(msg.from, { name: msg.peer.name, pc: null, dc: null, makingOffer: false });
                         this.onPeerJoin(msg.from, msg.peer.name);
-                        await this._initiateConnection(msg.from);
+
+                        // ONLY initiate if we should be the caller
+                        if (this._shouldBeCaller(msg.from)) {
+                            await this._initiateConnection(msg.from);
+                        } else {
+                            this.onLog(`Waiting for ${msg.peer.name} to initiate connection`);
+                        }
                     }
                     break;
-
                 case "peer-left":
                     const peer = this.peers.get(msg.from);
                     if (peer) {
@@ -254,7 +267,7 @@ class SimpleP2P {
         const pc = new RTCPeerConnection(this.config);
         peer.pc = pc;
 
-        // 1. DataChannel
+        // 1. DataChannel (must be created before setting remote description)
         if (isCaller) {
             const dc = pc.createDataChannel("data");
             this._setupDataChannel(peerId, dc);
@@ -263,29 +276,38 @@ class SimpleP2P {
             this._setupDataChannel(peerId, event.channel);
         };
 
-        // 2. Local media tracks (if already available)
-        if (this.localStream) {
-            this.localStream.getTracks().forEach((track) => {
-                pc.addTrack(track, this.localStream);
-            });
+        // 2. Add audio track if localStream exists
+        if (this.localStream && this.localStream.getAudioTracks().length > 0) {
+            const audioTrack = this.localStream.getAudioTracks()[0];
+            const sender = pc.addTrack(audioTrack, this.localStream);
+            this.onLog(`Added audio track to peer ${peerId}`);
+        } else {
+            // If no local stream yet, add transceiver for when stream is added later
+            pc.addTransceiver("audio", { direction: "sendrecv" });
+            this.onLog(`Added audio transceiver (waiting for stream) for peer ${peerId}`);
         }
 
         // 3. Receive remote media
         pc.ontrack = (event) => {
-            this.onLog(`Receiving audio/video track from ${peer.name}`);
+            this.onLog(`Receiving audio track from ${peer.name || peerId}`);
             const stream = event.streams?.[0] ?? new MediaStream([event.track]);
             this.onTrack(peerId, stream);
         };
 
-        // 4. FIX: Use makingOffer flag (perfect negotiation pattern) to prevent
-        //    onnegotiationneeded from sending a new offer while one is already in flight.
+        // 4. Perfect negotiation pattern
         pc.onnegotiationneeded = async () => {
             if (peer.makingOffer) return;
             try {
                 peer.makingOffer = true;
-                await pc.setLocalDescription(); // browser picks offer/rollback automatically
+                await pc.setLocalDescription();
                 if (this.ws?.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify({ type: "offer", to: peerId, sdp: pc.localDescription }));
+                    this.ws.send(
+                        JSON.stringify({
+                            type: "offer",
+                            to: peerId,
+                            sdp: pc.localDescription,
+                        }),
+                    );
                 }
             } catch (err) {
                 this.onError(`Negotiation failed: ${err}`);
@@ -296,15 +318,28 @@ class SimpleP2P {
 
         pc.onicecandidate = (e) => {
             if (e.candidate && this.ws?.readyState === WebSocket.OPEN) {
-                this.ws.send(JSON.stringify({ type: "ice-candidate", to: peerId, candidate: e.candidate }));
+                this.ws.send(
+                    JSON.stringify({
+                        type: "ice-candidate",
+                        to: peerId,
+                        candidate: e.candidate,
+                    }),
+                );
             }
         };
 
         pc.onconnectionstatechange = () => {
             this.onLog(`PC state with ${peerId}: ${pc.connectionState}`);
+            if (pc.connectionState === "connected") {
+                this.onLog(`✅ WebRTC connected to ${peerId}`);
+            }
             if (pc.connectionState === "failed") {
                 this.onError(`Connection to ${peerId} failed`);
             }
+        };
+
+        pc.onsignalingstatechange = () => {
+            this.onLog(`Signaling state with ${peerId}: ${pc.signalingState}`);
         };
 
         return pc;
@@ -322,5 +357,11 @@ class SimpleP2P {
                 this.onError(`Failed to parse message from ${peer.name}`);
             }
         };
+    }
+
+    _shouldBeCaller(peerId) {
+        // Deterministic: compare sorted IDs
+        const sortedIds = [this.myId, peerId].sort();
+        return sortedIds[0] === this.myId;
     }
 }
