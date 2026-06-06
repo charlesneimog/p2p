@@ -7,7 +7,9 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(BUILD_SHARED_LIBS OFF)
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
 set(NO_WERROR ON)
+set(NO_TESTS ON)
 add_compile_options(-Wno-error=format)
 
 # ╭──────────────────────────────────────╮
