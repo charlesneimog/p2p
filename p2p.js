@@ -272,6 +272,7 @@ class SimpleP2P {
             const dc = pc.createDataChannel("data");
             this._setupDataChannel(peerId, dc);
         }
+
         pc.ondatachannel = (event) => {
             this._setupDataChannel(peerId, event.channel);
         };
@@ -292,28 +293,6 @@ class SimpleP2P {
             this.onLog(`Receiving audio track from ${peer.name || peerId}`);
             const stream = event.streams?.[0] ?? new MediaStream([event.track]);
             this.onTrack(peerId, stream);
-        };
-
-        // 4. Perfect negotiation pattern
-        pc.onnegotiationneeded = async () => {
-            if (peer.makingOffer) return;
-            try {
-                peer.makingOffer = true;
-                await pc.setLocalDescription();
-                if (this.ws?.readyState === WebSocket.OPEN) {
-                    this.ws.send(
-                        JSON.stringify({
-                            type: "offer",
-                            to: peerId,
-                            sdp: pc.localDescription,
-                        }),
-                    );
-                }
-            } catch (err) {
-                this.onError(`Negotiation failed: ${err}`);
-            } finally {
-                peer.makingOffer = false;
-            }
         };
 
         pc.onicecandidate = (e) => {
@@ -340,6 +319,30 @@ class SimpleP2P {
 
         pc.onsignalingstatechange = () => {
             this.onLog(`Signaling state with ${peerId}: ${pc.signalingState}`);
+        };
+
+        peer.pc.onnegotiationneeded = async () => {
+            // STRICT BLOCK: Only the Caller is allowed to initiate an offer
+            if (!this._shouldBeCaller(peerId)) {
+                this.onLog(`Blocked negotiation for ${peerId} (Passive/Callee role strict enforcement).`);
+                return;
+            }
+
+            try {
+                peer.makingOffer = true;
+                await peer.pc.setLocalDescription();
+                this.ws.send(
+                    JSON.stringify({
+                        type: "offer",
+                        to: peerId,
+                        sdp: peer.pc.localDescription,
+                    }),
+                );
+            } catch (err) {
+                this.onError(`Negotiation error: ${err}`);
+            } finally {
+                peer.makingOffer = false;
+            }
         };
 
         return pc;

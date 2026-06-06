@@ -3,6 +3,7 @@ export class Room {
         this.state = state;
         this.env = env;
         this.clients = new Map();
+        this.messageCounter = 0;
     }
 
     async fetch(request) {
@@ -92,12 +93,14 @@ export class Room {
         if (data.to) {
             const target = this.clients.get(data.to);
             if (target) {
+                this.messageCounter++;
                 target.ws.send(
                     JSON.stringify({
                         type: data.type,
                         from: clientId,
                         sdp: data.sdp,
                         candidate: data.candidate,
+                        sequence_id: this.messageCounter,
                     }),
                 );
             }

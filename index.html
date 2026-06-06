@@ -410,18 +410,15 @@
                 };
 
                 network.onTrack = (peerId, remoteStream) => {
-                    const peer = network.peers.get(peerId);
-                    const peerName = peer ? peer.name : "Unknown";
-                    addLog(`Audio stream established from: ${peerName}`, "success");
-                    let audioElement = document.getElementById(`audio-${peerId}`);
-                    if (!audioElement) {
-                        audioElement = document.createElement("audio");
-                        audioElement.id = `audio-${peerId}`;
-                        audioElement.autoplay = true;
-                        document.body.appendChild(audioElement);
+                    addLog(`Receiving audio stream from ${peerId}`, "success");
+                    let audioEl = document.getElementById(`audio-${peerId}`);
+                    if (!audioEl) {
+                        audioEl = document.createElement("audio");
+                        audioEl.id = `audio-${peerId}`;
+                        audioEl.autoplay = true;
+                        document.body.appendChild(audioEl);
                     }
-                    audioElement.srcObject = remoteStream;
-                    console.log("done");
+                    audioEl.srcObject = remoteStream;
                 };
 
                 network.connect();
