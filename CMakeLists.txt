@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+set(BUILD_SHARED_LIBS OFF)
+set(NO_WERROR ON)
+add_compile_options(-Wno-error=format)
 
 # ╭──────────────────────────────────────╮
 # │               pd.cmake               │
@@ -75,5 +78,6 @@ target_link_libraries(
     p2p_tilde
     PRIVATE ixwebsocket
             nlohmann_json::nlohmann_json
-            datachannel
+            datachannel-static
             opus)
+set_target_properties(opus PROPERTIES POSITION_INDEPENDENT_CODE ON)
