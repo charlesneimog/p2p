@@ -55,6 +55,7 @@
 #X obj 22 27 cnv 18 20 20 empty empty 4 6 10 0 10 #dfdfdf #ff0400 0;
 #X obj 243 384 route user_5501;
 #X obj 45 244 loadbang;
+#X obj 83 415 print;
 #X connect 0 0 17 0;
 #X connect 1 0 2 0;
 #X connect 3 0 17 0;
@@ -72,6 +73,7 @@
 #X connect 12 0 18 0;
 #X connect 17 0 21 0;
 #X connect 17 1 9 0;
+#X connect 17 1 28 0;
 #X connect 18 0 10 0;
 #X connect 19 0 17 0;
 #X connect 26 0 11 0;

@@ -5,98 +5,51 @@ class SimpleP2P {
         this.serverUrl = serverUrl;
         this.myId = null;
         this.ws = null;
-        this.peers = new Map(); // id -> { name, pc, dc }
+        this.peers = new Map();
         this.localStream = null;
+
         this.config = {
             iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         };
 
-        this.onConnect = (myId) => {};
+        this.onConnect = () => {};
         this.onDisconnect = () => {};
-        this.onPeerJoin = (peerId, peerName) => {};
-        this.onPeerLeave = (peerId) => {};
-        this.onMessage = (peerId, data) => {};
-        this.onTrack = (peerId, remoteStream) => {};
-        this.onError = (errorMsg) => {};
-        this.onLog = (msg) => {};
+        this.onPeerJoin = () => {};
+        this.onPeerLeave = () => {};
+        this.onMessage = () => {};
+        this.onTrack = () => {};
+        this.onError = () => {};
+        this.onLog = () => {};
     }
 
-    addMediaStream(stream) {
-        this.localStream = stream;
-        for (const [id, peer] of this.peers.entries()) {
-            if (peer.pc && peer.pc.connectionState === "connected") {
-                const senders = peer.pc.getSenders();
-                const hasAudio = senders.some((s) => s.track && s.track.kind === "audio");
-                if (!hasAudio) {
-                    const audioTrack = stream.getAudioTracks()[0];
-                    if (audioTrack) {
-                        peer.pc.addTrack(audioTrack, stream);
-                        this.onLog(`Added late audio track to existing connection with ${id}`);
-                        peer.makingOffer = true;
-                        peer.pc.onnegotiationneeded();
-                    }
-                }
-            }
-        }
-    }
-
+    // ─────────────────────────────────────
     connect() {
-        if (!this.room || !this.name) {
-            this.onError("Room and Name are required.");
-            return;
-        }
+        const url = `${this.serverUrl}?room=${this.room}`;
+        this.ws = new WebSocket(url);
 
-        this.onLog(`Connecting to signaling server for room: ${this.room}`);
-        const wsUrl = `${this.serverUrl}?room=${this.room}`;
-        this.ws = new WebSocket(wsUrl);
         this.ws.onopen = () => {
-            this.onLog("WebSocket connected.");
+            this.onLog("WebSocket connected");
             this.ws.send(JSON.stringify({ type: "join", name: this.name }));
         };
 
-        this.ws.onmessage = async (e) => {
-            const msg = JSON.parse(e.data);
+        this.ws.onmessage = async (event) => {
+            const msg = JSON.parse(event.data);
 
             switch (msg.type) {
                 case "welcome":
                     this.myId = msg.id;
-                    this.onConnect(this.myId);
+                    this.onConnect(msg.id);
                     break;
 
                 case "existing-peers":
-                    if (msg.peers && msg.peers.length > 0) {
-                        for (const p of msg.peers) {
-                            if (!this.peers.has(p.id)) {
-                                this.peers.set(p.id, { name: p.name, pc: null, dc: null, makingOffer: false });
-                                // Only initiate if we're the caller
-                                if (this._shouldBeCaller(p.id)) {
-                                    await this._initiateConnection(p.id);
-                                }
-                            }
-                        }
+                    for (const peer of msg.peers) {
+                        await this._ensurePeer(peer.id, peer.name);
                     }
                     break;
-                case "peer-joined":
-                    if (!this.peers.has(msg.from)) {
-                        this.peers.set(msg.from, { name: msg.peer.name, pc: null, dc: null, makingOffer: false });
-                        this.onPeerJoin(msg.from, msg.peer.name);
 
-                        // ONLY initiate if we should be the caller
-                        if (this._shouldBeCaller(msg.from)) {
-                            await this._initiateConnection(msg.from);
-                        } else {
-                            this.onLog(`Waiting for ${msg.peer.name} to initiate connection`);
-                        }
-                    }
-                    break;
-                case "peer-left":
-                    const peer = this.peers.get(msg.from);
-                    if (peer) {
-                        peer.dc?.close();
-                        peer.pc?.close();
-                        this.peers.delete(msg.from);
-                        this.onPeerLeave(msg.from);
-                    }
+                case "peer-joined":
+                    await this._ensurePeer(msg.from, msg.peer.name);
+                    this.onPeerJoin(msg.from, msg.peer.name);
                     break;
 
                 case "offer":
@@ -110,27 +63,48 @@ class SimpleP2P {
                 case "ice-candidate":
                     await this._handleIceCandidate(msg.from, msg.candidate);
                     break;
+
+                case "peer-left":
+                    this._removePeer(msg.from);
+                    break;
             }
         };
 
-        this.ws.onerror = () => this.onError("WebSocket Error");
         this.ws.onclose = () => this.disconnect();
+        this.ws.onerror = (err) => this.onError(err);
     }
 
+    // ─────────────────────────────────────
     disconnect() {
-        this.ws?.close();
         for (const [id, peer] of this.peers.entries()) {
-            peer.dc?.close();
             peer.pc?.close();
+            peer.dc?.close();
         }
         this.peers.clear();
-        this.myId = null;
-        this.localStream = null;
+        if (this.ws) this.ws.close();
         this.onDisconnect();
     }
 
-    broadcast(jsonData) {
-        const payload = JSON.stringify(jsonData);
+    // ─────────────────────────────────────
+    async addMediaStream(stream) {
+        this.localStream = stream;
+        for (const [peerId, peer] of this.peers.entries()) {
+            if (!peer.pc) continue;
+            const audioTrack = stream.getAudioTracks()[0];
+            if (!audioTrack) continue;
+
+            const transceiver = peer.pc.getTransceivers().find((t) => t.receiver && t.receiver.track.kind === "audio");
+            if (transceiver && transceiver.sender) {
+                await transceiver.sender.replaceTrack(audioTrack);
+            } else {
+                this.onError(new Error(`Transceiver lost for peer ${peerId}`));
+            }
+        }
+    }
+
+    // ─────────────────────────────────────
+    broadcast(data) {
+        const payload = JSON.stringify(data);
         for (const [id, peer] of this.peers.entries()) {
             if (peer.dc?.readyState === "open") {
                 peer.dc.send(payload);
@@ -138,128 +112,68 @@ class SimpleP2P {
         }
     }
 
-    _shouldBeCaller(peerId) {
-        const sortedIds = [this.myId, peerId].sort();
-        return sortedIds[0] === this.myId;
+    // ─────────────────────────────────────
+    async _ensurePeer(peerId, peerName = "Unknown") {
+        if (this.peers.has(peerId)) return this.peers.get(peerId);
+
+        const peer = {
+            id: peerId,
+            name: peerName,
+            isPolite: this._determinePoliteness(this.myId, peerId),
+            pc: null,
+            dc: null,
+            makingOffer: false,
+            ignoreOffer: false,
+            pendingCandidates: [],
+        };
+
+        this.peers.set(peerId, peer);
+        peer.pc = this._createPeerConnection(peerId, peer);
+
+        return peer;
     }
 
     // ─────────────────────────────────────
-    async _initiateConnection(peerId) {
-        const peer = this.peers.get(peerId);
-        if (!peer) return;
-
-        if (!this._shouldBeCaller(peerId)) {
-            this.onLog(`Waiting for ${peerId} to initiate connection`);
-            return;
-        }
-
-        this.onLog(`Initiating connection as caller to ${peerId}`);
-        // _createPeerConnection sets up onnegotiationneeded which will send the first offer.
-        // We do NOT manually create/send an offer here to avoid the double-offer race.
-        await this._createPeerConnection(peerId, true);
+    // Single source of truth for topology and politeness
+    _determinePoliteness(myId, remoteId) {
+        return myId > remoteId;
     }
 
-    async _handleOffer(peerId, offer) {
-        let peer = this.peers.get(peerId);
+    // ─────────────────────────────────────
+    _createPeerConnection(peerId, peer) {
+        const pc = new RTCPeerConnection(this.config);
 
-        // FIX: If the peer isn't in our map yet (race condition), add them.
-        if (!peer) {
-            peer = { name: "Unknown", pc: null, dc: null, makingOffer: false };
-            this.peers.set(peerId, peer);
-        }
-
-        const polite = !this._shouldBeCaller(peerId); // answerer = polite peer
-
-        const offerCollision = peer.makingOffer || (peer.pc && peer.pc.signalingState !== "stable");
-
-        if (!polite && offerCollision) {
-            // Impolite peer ignores colliding offers
-            this.onLog(`Ignoring colliding offer from ${peerId} (impolite peer)`);
-            return;
-        }
-
-        // FIX: Re-use the existing RTCPeerConnection for renegotiation offers
-        //      instead of creating a new one. _createPeerConnection returns the
-        //      existing pc if peer.pc is already set.
-        const pc = await this._createPeerConnection(peerId, false);
-
-        // FIX: If there's a collision and we're the polite peer, roll back first.
-        if (offerCollision) {
-            await Promise.all([
-                pc.setLocalDescription({ type: "rollback" }),
-                pc.setRemoteDescription(new RTCSessionDescription(offer)),
-            ]);
-        } else {
-            await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        }
-
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        this.ws.send(
-            JSON.stringify({
-                type: "answer",
-                to: peerId,
-                sdp: answer,
-            }),
-        );
-    }
-
-    async _handleAnswer(peerId, answer) {
-        const peer = this.peers.get(peerId);
-        if (peer?.pc) {
-            // Guard: only apply if we're actually waiting for an answer
-            if (peer.pc.signalingState === "have-local-offer") {
-                await peer.pc.setRemoteDescription(new RTCSessionDescription(answer));
-            } else {
-                this.onLog(`Ignoring late/stale answer from ${peerId} (signalingState: ${peer.pc.signalingState})`);
+        // Deterministic single transceiver
+        const audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
+        if (this.localStream) {
+            const audioTrack = this.localStream.getAudioTracks()[0];
+            if (audioTrack) {
+                audioTransceiver.sender.replaceTrack(audioTrack);
             }
         }
-    }
 
-    async _handleIceCandidate(peerId, candidate) {
-        const peer = this.peers.get(peerId);
-        if (!peer) {
-            this.onLog(`Queueing ICE candidate from unknown peer ${peerId}`);
-            this.peers.set(peerId, {
-                name: "Unknown",
-                pc: null,
-                dc: null,
-                makingOffer: false,
-                pendingCandidates: [candidate],
-            });
-            return;
-        }
+        pc.onicecandidate = (event) => {
+            if (!event.candidate) return;
+            this.ws.send(
+                JSON.stringify({
+                    type: "ice-candidate",
+                    to: peerId,
+                    candidate: event.candidate,
+                }),
+            );
+        };
 
-        if (!peer.pc || !peer.pc.remoteDescription) {
-            peer.pendingCandidates ??= [];
-            peer.pendingCandidates.push(candidate);
-            this.onLog(`Queueing ICE candidate from ${peerId} (remote description not set yet)`);
-            return;
-        }
+        pc.ontrack = (event) => {
+            this.onTrack(peerId, event.streams[0]);
+        };
 
-        try {
-            await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-            this.onError(`ICE candidate error for ${peerId}: ${e}`);
-        }
-    }
+        pc.onconnectionstatechange = () => {
+            this.onLog(`Connection ${peerId}: ${pc.connectionState}`);
+            if (pc.connectionState === "failed") pc.restartIce();
+        };
 
-    async _createPeerConnection(peerId, isCaller) {
-        let peer = this.peers.get(peerId);
-        if (!peer) {
-            peer = { name: "Unknown", pc: null, dc: null, makingOffer: false };
-            this.peers.set(peerId, peer);
-        }
-
-        // FIX: Return existing PC — this is intentional for renegotiation.
-        if (peer.pc) return peer.pc;
-
-        const pc = new RTCPeerConnection(this.config);
-        peer.pc = pc;
-
-        // 1. DataChannel (must be created before setting remote description)
-        if (isCaller) {
+        // Only one peer needs to aggressively open the data channel; the other receives it
+        if (!peer.isPolite) {
             const dc = pc.createDataChannel("data");
             this._setupDataChannel(peerId, dc);
         }
@@ -268,69 +182,22 @@ class SimpleP2P {
             this._setupDataChannel(peerId, event.channel);
         };
 
-        // 2. Add audio track if localStream exists
-        if (this.localStream && this.localStream.getAudioTracks().length > 0) {
-            const audioTrack = this.localStream.getAudioTracks()[0];
-            const sender = pc.addTrack(audioTrack, this.localStream);
-            this.onLog(`Added audio track to peer ${peerId}`);
-        } else {
-            // If no local stream yet, add transceiver for when stream is added later
-            pc.addTransceiver("audio", { direction: "sendrecv" });
-            this.onLog(`Added audio transceiver (waiting for stream) for peer ${peerId}`);
-        }
-
-        // 3. Receive remote media
-        pc.ontrack = (event) => {
-            this.onLog(`Receiving audio track from ${peer.name || peerId}`);
-            const stream = event.streams?.[0] ?? new MediaStream([event.track]);
-            this.onTrack(peerId, stream);
-        };
-
-        pc.onicecandidate = (e) => {
-            if (e.candidate && this.ws?.readyState === WebSocket.OPEN) {
-                this.ws.send(
-                    JSON.stringify({
-                        type: "ice-candidate",
-                        to: peerId,
-                        candidate: e.candidate,
-                    }),
-                );
-            }
-        };
-
-        pc.onconnectionstatechange = () => {
-            this.onLog(`PC state with ${peerId}: ${pc.connectionState}`);
-            if (pc.connectionState === "connected") {
-                this.onLog(`✅ WebRTC connected to ${peerId}`);
-            }
-            if (pc.connectionState === "failed") {
-                this.onError(`Connection to ${peerId} failed`);
-            }
-        };
-
-        pc.onsignalingstatechange = () => {
-            this.onLog(`Signaling state with ${peerId}: ${pc.signalingState}`);
-        };
-
-        peer.pc.onnegotiationneeded = async () => {
-            // STRICT BLOCK: Only the Caller is allowed to initiate an offer
-            if (!this._shouldBeCaller(peerId)) {
-                this.onLog(`Blocked negotiation for ${peerId} (Passive/Callee role strict enforcement).`);
-                return;
-            }
-
+        // Automatic Negotiation Trigger
+        pc.onnegotiationneeded = async () => {
+            console.log(pc);
+            if (pc.signalingState === "stable") return;
             try {
                 peer.makingOffer = true;
-                await peer.pc.setLocalDescription();
+                await pc.setLocalDescription();
                 this.ws.send(
                     JSON.stringify({
                         type: "offer",
                         to: peerId,
-                        sdp: peer.pc.localDescription,
+                        sdp: pc.localDescription,
                     }),
                 );
             } catch (err) {
-                this.onError(`Negotiation error: ${err}`);
+                this.onError(new Error(`Negotiation failed: ${err.message}`));
             } finally {
                 peer.makingOffer = false;
             }
@@ -339,23 +206,105 @@ class SimpleP2P {
         return pc;
     }
 
+    // ─────────────────────────────────────
+    async _handleOffer(peerId, description) {
+        const peer = this.peers.get(peerId);
+        if (!peer || !peer.pc) return;
+
+        const pc = peer.pc;
+        const offerCollision = peer.makingOffer || pc.signalingState !== "stable";
+
+        peer.ignoreOffer = !peer.isPolite && offerCollision;
+
+        if (peer.ignoreOffer) {
+            this.onLog(`Collision detected. As the impolite peer, dropping offer from ${peerId}.`);
+            return;
+        }
+
+        try {
+            await pc.setRemoteDescription(new RTCSessionDescription(description));
+            await pc.setLocalDescription();
+
+            this.ws.send(
+                JSON.stringify({
+                    type: "answer",
+                    to: peerId,
+                    sdp: pc.localDescription,
+                }),
+            );
+        } catch (err) {
+            this.onError(new Error(`Failed to handle offer: ${err.message}`));
+        }
+    }
+
+    // ─────────────────────────────────────
+    async _handleAnswer(peerId, answer) {
+        const peer = this.peers.get(peerId);
+        if (!peer || !peer.pc) return;
+
+        try {
+            if (peer.pc.signalingState !== "have-local-offer") return;
+
+            await peer.pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+            while (peer.pendingCandidates.length > 0) {
+                const candidate = peer.pendingCandidates.shift();
+                try {
+                    await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch (e) {
+                    this.onLog(`Failed to add queued ICE candidate: ${e.message}`);
+                }
+            }
+        } catch (err) {
+            this.onError(err);
+        }
+    }
+
+    // ─────────────────────────────────────
+    async _handleIceCandidate(peerId, candidate) {
+        const peer = this.peers.get(peerId);
+        if (!peer || !peer.pc) return;
+
+        try {
+            if (!peer.pc.remoteDescription) {
+                if (!peer.ignoreOffer) {
+                    peer.pendingCandidates.push(candidate);
+                }
+                return;
+            }
+            await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+            if (!peer.ignoreOffer) {
+                this.onError(err);
+            }
+        }
+    }
+
+    // ─────────────────────────────────────
     _setupDataChannel(peerId, dc) {
         const peer = this.peers.get(peerId);
-        peer.dc = dc;
+        if (!peer) return;
 
-        dc.onmessage = (e) => {
+        peer.dc = dc;
+        dc.onopen = () => this.onLog(`DataChannel open with ${peerId}`);
+        dc.onclose = () => this.onLog(`DataChannel closed with ${peerId}`);
+        dc.onmessage = (event) => {
             try {
-                const data = JSON.parse(e.data);
-                this.onMessage(peerId, data);
-            } catch (err) {
-                this.onError(`Failed to parse message from ${peer.name}`);
+                this.onMessage(peerId, JSON.parse(event.data));
+            } catch {
+                this.onMessage(peerId, event.data);
             }
         };
     }
 
-    _shouldBeCaller(peerId) {
-        // Deterministic: compare sorted IDs
-        const sortedIds = [this.myId, peerId].sort();
-        return sortedIds[0] === this.myId;
+    // ─────────────────────────────────────
+    _removePeer(peerId) {
+        const peer = this.peers.get(peerId);
+        if (!peer) return;
+
+        peer.dc?.close();
+        peer.pc?.close();
+        this.peers.delete(peerId);
+        this.onPeerLeave(peerId);
     }
 }

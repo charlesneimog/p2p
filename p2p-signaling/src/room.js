@@ -7,19 +7,19 @@ export class Room {
     }
 
     async fetch(request) {
-        // --- ORIGIN PROTECTION START ---
         const origin = request.headers.get("Origin");
-
         const allowedOrigins = [
             "https://charlesneimog.github.io",
             "http://localhost:5004",
             // something else
         ];
 
-        if (!allowedOrigins.includes(origin)) {
+        // Allow if no Origin header OR if origin is in the allowed list
+        if (!origin || allowedOrigins.includes(origin)) {
+            // Accept the connection
+        } else {
             return new Response("Forbidden: Unauthorized Origin", { status: 403 });
         }
-        // --- ORIGIN PROTECTION END ---
 
         const upgrade = request.headers.get("Upgrade");
         if (!upgrade || upgrade.toLowerCase() !== "websocket") {
