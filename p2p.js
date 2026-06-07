@@ -3,18 +3,14 @@ class SimpleP2P {
         this.room = room;
         this.name = name;
         this.serverUrl = serverUrl;
-
         this.myId = null;
         this.ws = null;
         this.peers = new Map(); // id -> { name, pc, dc }
-
         this.localStream = null;
-
         this.config = {
             iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         };
 
-        // Hooks (Callbacks)
         this.onConnect = (myId) => {};
         this.onDisconnect = () => {};
         this.onPeerJoin = (peerId, peerName) => {};
@@ -27,20 +23,17 @@ class SimpleP2P {
 
     addMediaStream(stream) {
         this.localStream = stream;
-
         for (const [id, peer] of this.peers.entries()) {
             if (peer.pc && peer.pc.connectionState === "connected") {
                 const senders = peer.pc.getSenders();
                 const hasAudio = senders.some((s) => s.track && s.track.kind === "audio");
-
                 if (!hasAudio) {
                     const audioTrack = stream.getAudioTracks()[0];
                     if (audioTrack) {
                         peer.pc.addTrack(audioTrack, stream);
                         this.onLog(`Added late audio track to existing connection with ${id}`);
-                        // Trigger renegotiation
-                        peer.makingOffer = false; // Reset flag to allow negotiation
-                        peer.pc.onnegotiationneeded(); // Force negotiation
+                        peer.makingOffer = true;
+                        peer.pc.onnegotiationneeded();
                     }
                 }
             }
@@ -54,10 +47,8 @@ class SimpleP2P {
         }
 
         this.onLog(`Connecting to signaling server for room: ${this.room}`);
-
         const wsUrl = `${this.serverUrl}?room=${this.room}`;
         this.ws = new WebSocket(wsUrl);
-
         this.ws.onopen = () => {
             this.onLog("WebSocket connected.");
             this.ws.send(JSON.stringify({ type: "join", name: this.name }));

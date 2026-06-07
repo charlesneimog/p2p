@@ -416,6 +416,11 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
             x->state->shared_ws->send(join.dump());
             p2p_safelogpost(x, PD_NORMAL, "Connected to the room: '%s'", room->s_name);
             return;
+        } else if (msg->type == ix::WebSocketMessageType::Error) {
+            p2p_safelogpost(x, PD_ERROR, "Web Socket error: '%s'", msg->errorInfo.reason.c_str());
+            return;
+        } else {
+            p2p_safelogpost(x, PD_DEBUG, "message %d, %s", msg->type, msg->str.c_str());
         }
 
         if (msg->type != ix::WebSocketMessageType::Message) {
@@ -474,6 +479,7 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
                 }
                 node->remote_peer_id = from_peer;
                 node->ws = x->state->shared_ws;
+                node->user = from_peer; // ✅ ADD THIS — use ID as fallback name
 
                 bool should_be_caller = (x->state->local_peer_id < from_peer);
                 node->is_polite = !should_be_caller;
@@ -522,11 +528,7 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
             if (!node) {
                 return;
             }
-
-            // CRITICAL FIX: Release the glare lock so future incoming offers are not falsely
-            // ignored
             node->making_offer = false;
-
             std::string sdp_str;
             if (data["sdp"].is_object()) {
                 sdp_str = data["sdp"]["sdp"].get<std::string>();
@@ -545,15 +547,6 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
                 p2p_safelogpost(x, PD_ERROR, "Failed to set remote description (answer): %s",
                                 e.what());
             }
-            try {
-                rtc::Description desc(sdp_str, "answer");
-                node->pc->setRemoteDescription(std::move(desc));
-                node->remote_description_set = true;
-                p2p_flush_pending_candidates(x, node);
-            } catch (const std::exception &e) {
-                p2p_safelogpost(x, PD_ERROR, "Failed to set remote description (answer): %s",
-                                e.what());
-            }
 
         } else if (type == "ice-candidate") {
             P2PNode *node = p2p_find_node_by_peer(x, from_peer);
@@ -562,7 +555,8 @@ static void p2p_connect(p2p_tilde *x, t_symbol *wss, t_symbol *room, t_symbol *u
             }
 
             if (node->ignore_offer) {
-                return; // Do not process candidates belonging to an ignored offer
+                // Do not process candidates belonging to an ignored offer
+                return;
             }
 
             std::string cand_str;
