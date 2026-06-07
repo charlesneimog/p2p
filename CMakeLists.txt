@@ -38,18 +38,6 @@ find_package(Boost REQUIRED)
 # ╰──────────────────────────────────────╯
 cpmaddpackage(
     NAME
-    IXWebSocket
-    GITHUB_REPOSITORY
-    machinezone/IXWebSocket
-    GIT_TAG
-    v11.4.4
-    OPTIONS
-    "USE_TLS ON"
-    "BUILD_SHARED_LIBS OFF"
-    "USE_ZLIB ON")
-
-cpmaddpackage(
-    NAME
     libdatachannel
     GITHUB_REPOSITORY
     paullouisageneau/libdatachannel
@@ -58,8 +46,7 @@ cpmaddpackage(
     OPTIONS
     "USE_NICE OFF"
     "USE_SYSTEM_SRTP OFF"
-    "NO_MEDIA OFF"
-    "NO_WEBSOCKET ON")
+    "NO_MEDIA OFF")
 
 cpmaddpackage(
     NAME
@@ -73,26 +60,28 @@ cpmaddpackage(
     "OPUS_BUILD_TESTING OFF"
     "OPUS_BUILD_PROGRAMS OFF")
 
+cpmaddpackage("gh:gabime/spdlog@1.17.0")
+set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 pd_add_external(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p~.cpp")
 target_include_directories(p2p_tilde PRIVATE "${opus_SOURCE_DIR}/include")
-message(WARNING "${opus_SOURCE_DIR}")
 target_link_libraries(
     p2p_tilde
-    PRIVATE ixwebsocket
-            nlohmann_json::nlohmann_json
+    PRIVATE nlohmann_json::nlohmann_json
             datachannel-static
+            spdlog
             opus)
+
 set_target_properties(opus PROPERTIES POSITION_INDEPENDENT_CODE ON)
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    #add debug symbols to the target
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    # add debug symbols to the target
     target_compile_options(p2p_tilde PRIVATE -g)
-    
+
 endif()
 
 execute_process(
     COMMAND brew --prefix boost
     OUTPUT_VARIABLE BOOST_PREFIX
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 include_directories(${BOOST_PREFIX}/include)
