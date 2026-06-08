@@ -208,12 +208,9 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
     config.iceServers.emplace_back("stun:stun.l.google.com:19302");
     node->pc = std::make_shared<rtc::PeerConnection>(config);
     node->remote_description_set = false;
-
-    p2p_safelogpost(x, PD_ERROR, "am I polite %d", node->is_polite);
-
+    p2p_safelogpost(x, PD_ERROR, "Pd is polite=%d", node->is_polite);
     node->pc->onLocalDescription([x, node](rtc::Description description) {
         p2p_safelogpost(x, PD_DEBUG, "onLocalDescription %s", description.typeString().c_str());
-
         if (node->ws) {
             json msg = {
                 {"type", description.typeString()},
@@ -226,14 +223,12 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
     });
 
     auto install_sendrecv_handler = [node](std::shared_ptr<rtc::Track> track) {
-        node->rtp_config = std::make_shared<rtc::RtpPacketizationConfig>(
-            node->audio_ssrc, "audio-send", 109, node->sample_rate);
-
+        node->rtp_config = std::make_shared<rtc::RtpPacketizationConfig>(node->audio_ssrc, "audio",
+                                                                         109, node->sample_rate);
         auto handler = std::make_shared<rtc::OpusRtpPacketizer>(node->rtp_config);
         handler->addToChain(std::make_shared<rtc::OpusRtpDepacketizer>());
         handler->addToChain(std::make_shared<rtc::RtcpReceivingSession>());
         handler->addToChain(std::make_shared<rtc::RtcpSrReporter>(node->rtp_config));
-
         track->setMediaHandler(handler);
         node->audio_track = track;
     };
@@ -241,36 +236,13 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
     // Offerer creates the audio m-line.
     if (!node->is_polite) {
         rtc::Description::Audio audio("audio", rtc::Description::Direction::SendRecv);
-        audio.addOpusCodec(111);
-        audio.addSSRC(node->audio_ssrc, "audio-send");
-
+        audio.addOpusCodec(109);
+        audio.addSSRC(node->audio_ssrc, "audio");
         node->audio_track = node->pc->addTrack(audio);
         install_sendrecv_handler(node->audio_track);
-    }
-
-    node->pc->onTrack([x, node, install_sendrecv_handler](std::shared_ptr<rtc::Track> track) {
-        p2p_safelogpost(x, PD_NORMAL, "Remote audio track active for peer %s",
-                        node->remote_peer_id.c_str());
-
-        if (node->is_polite) {
-            auto desc = track->description();
-            desc.addSSRC(node->audio_ssrc, "audio-send");
-            track->setDescription(desc);
-
-            install_sendrecv_handler(track);
-
-            if (node->pc->signalingState() ==
-                rtc::PeerConnection::SignalingState::HaveRemoteOffer) {
-                node->pc->setLocalDescription();
-            }
-
-        } else {
-            track->setMediaHandler(std::make_shared<rtc::OpusRtpDepacketizer>());
-            track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
-        }
-
-        track->onFrame([x, node](rtc::binary data, rtc::FrameInfo info) {
+        node->audio_track->onFrame([x, node](rtc::binary data, rtc::FrameInfo info) {
             if (!node->opus_dec) {
+                p2p_safelogpost(x, PD_ERROR, "Opus decode not initialized");
                 return;
             }
 
@@ -285,6 +257,61 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
                 for (int i = 0; i < samples; i++) {
                     node->receive_buffer.push(pcm[i]);
                 }
+            }
+
+            if (samples < 0) {
+                p2p_safelogpost(x, PD_ERROR, "Opus decode failed: %d, bytes=%zu", samples,
+                                data.size());
+                return;
+            }
+        });
+    }
+
+    node->pc->onTrack([x, node, install_sendrecv_handler](std::shared_ptr<rtc::Track> track) {
+        p2p_safelogpost(x, PD_NORMAL, "Remote audio track active for peer %s",
+                        node->remote_peer_id.c_str());
+
+        if (node->is_polite) {
+            auto desc = track->description();
+            desc.addSSRC(node->audio_ssrc, "audio");
+            track->setDescription(desc);
+
+            install_sendrecv_handler(track);
+
+            if (node->pc->signalingState() ==
+                rtc::PeerConnection::SignalingState::HaveRemoteOffer) {
+                node->pc->setLocalDescription();
+            }
+
+        } else {
+            auto handler = std::make_shared<rtc::OpusRtpDepacketizer>();
+            handler->addToChain(std::make_shared<rtc::RtcpReceivingSession>());
+            track->setMediaHandler(handler);
+        }
+
+        track->onFrame([x, node](rtc::binary data, rtc::FrameInfo info) {
+            if (!node->opus_dec) {
+                p2p_safelogpost(x, PD_ERROR, "Opus decode not initialized");
+                return;
+            }
+
+            constexpr int MAX_SAMPLES = 5760;
+            float pcm[MAX_SAMPLES];
+
+            int samples = opus_decode_float(
+                node->opus_dec, reinterpret_cast<const unsigned char *>(data.data()),
+                static_cast<opus_int32>(data.size()), pcm, MAX_SAMPLES, 0);
+
+            if (samples > 0) {
+                for (int i = 0; i < samples; i++) {
+                    node->receive_buffer.push(pcm[i]);
+                }
+            }
+
+            if (samples < 0) {
+                p2p_safelogpost(x, PD_ERROR, "Opus decode failed: %d, bytes=%zu", samples,
+                                data.size());
+                return;
             }
         });
     });
