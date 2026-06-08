@@ -97,7 +97,6 @@ struct p2p_state {
     std::vector<std::unique_ptr<P2PNode>> nodes;
     std::shared_ptr<rtc::WebSocket> shared_ws;
     std::unordered_map<std::string, int> peers_channels;
-    std::string origin;
     std::string jsonkey;
 };
 
@@ -382,11 +381,6 @@ static void p2p_flush_pending_candidates(p2p_tilde *x, P2PNode *node) {
         }
     }
     node->pending_remote_candidates.clear();
-}
-
-// ─────────────────────────────────────
-static void p2p_origin(p2p_tilde *x, t_symbol *s) {
-    x->state->origin = s->s_name;
 }
 
 // ─────────────────────────────────────
@@ -831,6 +825,14 @@ static t_int *p2p_perform(t_int *w) {
     int n = (int)w[4];
     int num_chans = (int)w[5];
 
+    if (!x->wants_stream) {
+        // Clear all output channels first
+        for (int ch = 0; ch < num_chans; ch++) {
+            memset(out + ch * n, 0, n * sizeof(t_sample));
+        }
+        return (w + 6);
+    }
+
     if (x->multichannel) {
         for (auto &node : x->state->nodes) {
             if (node->is_streaming && !node->remote_peer_id.empty() && node->pc) {
@@ -1090,7 +1092,6 @@ extern "C" void p2p_tilde_setup(void) {
     class_addmethod(p2p_tilde_class, (t_method)p2p_connect, gensym("connect"), A_SYMBOL, A_SYMBOL,
                     A_SYMBOL, 0);
     class_addmethod(p2p_tilde_class, (t_method)p2p_disconnect, gensym("disconnect"), A_NULL, 0);
-    class_addmethod(p2p_tilde_class, (t_method)p2p_origin, gensym("origin"), A_SYMBOL, 0);
     class_addmethod(p2p_tilde_class, (t_method)p2p_message, gensym("message"), A_GIMME, 0);
     class_addmethod(p2p_tilde_class, (t_method)p2p_channel, gensym("setchannel"), A_SYMBOL, A_FLOAT,
                     0);

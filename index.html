@@ -222,13 +222,6 @@
                     >
                         Send Test Message
                     </button>
-                    <button
-                        class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all flex items-center gap-2"
-                        id="btn-init-mic"
-                    >
-                        <span class="material-symbols-outlined text-[18px]" data-icon="mic">mic</span>
-                        Initialize Mic
-                    </button>
                 </div>
                 <div
                     class="w-full bg-inverse-surface rounded-xl border border-outline-variant p-4 h-64 overflow-y-auto flex flex-col-reverse gap-1 shadow-inner"
@@ -256,7 +249,7 @@
             const peerCount = document.getElementById("peer-count");
             const logDiv = document.getElementById("console-log");
             const sendMsgBtn = document.getElementById("btn-test-msg");
-            const initAudioBtn = document.getElementById("btn-init-mic");
+            //const initAudioBtn = document.getElementById("btn-init-mic");
 
             let network = null;
             let uiRefreshInterval = null;
@@ -384,7 +377,6 @@
 
                         network.addMediaStream(stream);
                         addLog("Hardware active. Mic added to local stream pool.", "success");
-                        initAudioBtn.disabled = true;
                     } catch (err) {
                         addLog(`Hardware Error: ${err.message}`, "error");
                     }
@@ -398,7 +390,6 @@
                     // Lock Messaging UI
                     sendMsgBtn.disabled = true;
                     sendMsgBtn.classList.add("opacity-50", "cursor-not-allowed");
-                    initAudioBtn.disabled = false;
 
                     if (uiRefreshInterval) clearInterval(uiRefreshInterval);
                     renderPeers();
@@ -467,31 +458,6 @@
                 const payload = { type: "message", text: "Hello P2P Network!" };
                 network.broadcast(payload);
                 addLog(`You: ${payload.text}`, "info");
-            };
-
-            initAudioBtn.onclick = async () => {
-                if (!network) {
-                    addLog("Context Error: Must join a room before initializing media devices.", "error");
-                    return;
-                }
-
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            echoCancellation: false,
-                            noiseSuppression: false,
-                            autoGainControl: false,
-                            channelCount: 1,
-                        },
-                        video: false,
-                    });
-
-                    network.addMediaStream(stream);
-                    addLog("Hardware active. Mic added to local stream pool.", "success");
-                    initAudioBtn.disabled = true;
-                } catch (err) {
-                    addLog(`Hardware Error: ${err.message}`, "error");
-                }
             };
         </script>
     </body>
