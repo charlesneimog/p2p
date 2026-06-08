@@ -1001,6 +1001,7 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
         node->tx_thread = std::thread([node_ptr = node.get()]() {
             constexpr int FRAME_SIZE = 480; // 10 ms at 48 kHz
             constexpr int MAX_OPUS_BYTES = 4000;
+            int frame = 0;
 
             float pcm_frame[FRAME_SIZE];
             unsigned char opus_payload[MAX_OPUS_BYTES];
@@ -1031,11 +1032,15 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
                 if (bytes <= 0) {
                     continue;
                 }
+                if (frame % 100 == 0) {
+                    p2p_safelogpost(nullptr, PD_ERROR, "Sending audio to peer %s",
+                                    node_ptr->user.c_str());
+                }
 
                 node_ptr->audio_track->send(reinterpret_cast<const std::byte *>(opus_payload),
                                             static_cast<size_t>(bytes));
-
                 node_ptr->rtp_config->timestamp += FRAME_SIZE;
+                frame++;
             }
         });
 

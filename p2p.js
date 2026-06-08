@@ -91,22 +91,33 @@ class SimpleP2P {
         const audioTrack = stream.getAudioTracks()[0];
         if (!audioTrack) return;
 
+        // Add track to all existing peers
         for (const [peerId, peer] of this.peers.entries()) {
-            if (!peer.pc) continue;
-
-            const transceiver = peer.pc
-                .getTransceivers()
-                .find((t) => t.receiver?.track?.kind === "audio" || t.mid === "audio");
-
-            if (transceiver?.sender) {
-                transceiver.direction = "sendrecv";
-                await transceiver.sender.replaceTrack(audioTrack);
-            } else {
-                this.onError(new Error(`No audio transceiver for peer ${peerId}`));
-            }
+            await this._addTrackToPeer(peer, audioTrack);
         }
     }
 
+    // ─────────────────────────────────────
+    async _addTrackToPeer(peer, audioTrack) {
+        if (!peer.pc) return;
+
+        const transceiver = peer.pc
+            .getTransceivers()
+            .find((t) => t.receiver?.track?.kind === "audio" || t.mid === "audio");
+
+        if (transceiver?.sender) {
+            transceiver.direction = "sendrecv";
+            await transceiver.sender.replaceTrack(audioTrack);
+        } else if (!peer.isPolite) {
+            const newTransceiver = peer.pc.addTransceiver(audioTrack, {
+                direction: "sendrecv",
+            });
+            // Trigger renegotiation
+            if (peer.pc.signalingState === "stable") {
+                peer.pc.onnegotiationneeded();
+            }
+        }
+    }
     // ─────────────────────────────────────
     broadcast(data) {
         const payload = JSON.stringify(data);
@@ -152,17 +163,19 @@ class SimpleP2P {
 
         // Only the impolite side pre-creates offerable media.
         // If browser is polite, wait for Pd's offer to create the audio m-line.
-        if (!peer.isPolite) {
-            audioTransceiver = pc.addTransceiver("audio", {
-                direction: "sendrecv",
-            });
-
-            if (this.localStream) {
-                const audioTrack = this.localStream.getAudioTracks()[0];
-                if (audioTrack) {
-                    audioTransceiver.sender.replaceTrack(audioTrack);
-                }
+        if (this.localStream) {
+            const audioTrack = this.localStream.getAudioTracks()[0];
+            if (audioTrack && !peer.isPolite) {
+                const transceiver = pc.addTransceiver(audioTrack, {
+                    direction: "sendrecv",
+                });
+            } else if (audioTrack) {
+                // For polite peers, just create a recvonly transceiver initially
+                pc.addTransceiver("audio", { direction: "recvonly" });
             }
+        } else if (!peer.isPolite) {
+            // No media yet, but create placeholder
+            pc.addTransceiver("audio", { direction: "sendrecv" });
         }
 
         pc.onicecandidate = (event) => {
