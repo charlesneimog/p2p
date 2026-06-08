@@ -88,16 +88,21 @@ class SimpleP2P {
     // ─────────────────────────────────────
     async addMediaStream(stream) {
         this.localStream = stream;
+        const audioTrack = stream.getAudioTracks()[0];
+        if (!audioTrack) return;
+
         for (const [peerId, peer] of this.peers.entries()) {
             if (!peer.pc) continue;
-            const audioTrack = stream.getAudioTracks()[0];
-            if (!audioTrack) continue;
 
-            const transceiver = peer.pc.getTransceivers().find((t) => t.receiver && t.receiver.track.kind === "audio");
-            if (transceiver && transceiver.sender) {
+            const transceiver = peer.pc
+                .getTransceivers()
+                .find((t) => t.receiver?.track?.kind === "audio" || t.mid === "audio");
+
+            if (transceiver?.sender) {
+                transceiver.direction = "sendrecv";
                 await transceiver.sender.replaceTrack(audioTrack);
             } else {
-                this.onError(new Error(`Transceiver lost for peer ${peerId}`));
+                this.onError(new Error(`No audio transceiver for peer ${peerId}`));
             }
         }
     }
@@ -143,17 +148,26 @@ class SimpleP2P {
     _createPeerConnection(peerId, peer) {
         const pc = new RTCPeerConnection(this.config);
 
-        // Deterministic single transceiver
-        const audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
-        if (this.localStream) {
-            const audioTrack = this.localStream.getAudioTracks()[0];
-            if (audioTrack) {
-                audioTransceiver.sender.replaceTrack(audioTrack);
+        let audioTransceiver = null;
+
+        // Only the impolite side pre-creates offerable media.
+        // If browser is polite, wait for Pd's offer to create the audio m-line.
+        if (!peer.isPolite) {
+            audioTransceiver = pc.addTransceiver("audio", {
+                direction: "sendrecv",
+            });
+
+            if (this.localStream) {
+                const audioTrack = this.localStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    audioTransceiver.sender.replaceTrack(audioTrack);
+                }
             }
         }
 
         pc.onicecandidate = (event) => {
             if (!event.candidate) return;
+
             this.ws.send(
                 JSON.stringify({
                     type: "ice-candidate",
@@ -170,10 +184,11 @@ class SimpleP2P {
 
         pc.onconnectionstatechange = () => {
             this.onLog(`Connection ${peerId}: ${pc.connectionState}`);
-            if (pc.connectionState === "failed") pc.restartIce();
+            if (pc.connectionState === "failed") {
+                pc.restartIce();
+            }
         };
 
-        // Only one peer needs to aggressively open the data channel; the other receives it
         if (!peer.isPolite) {
             const dc = pc.createDataChannel("data");
             this._setupDataChannel(peerId, dc);
@@ -183,12 +198,14 @@ class SimpleP2P {
             this._setupDataChannel(peerId, event.channel);
         };
 
-        // Automatic Negotiation Trigger
         pc.onnegotiationneeded = async () => {
             if (pc.signalingState !== "stable") return;
+
             try {
                 peer.makingOffer = true;
+
                 await pc.setLocalDescription();
+
                 this.ws.send(
                     JSON.stringify({
                         type: "offer",
@@ -223,9 +240,29 @@ class SimpleP2P {
 
         try {
             await pc.setRemoteDescription(new RTCSessionDescription(description));
+
+            // IMPORTANT: browser is polite/callee here.
+            // Pd's offer created the audio transceiver.
+            // Attach mic before creating the answer, otherwise Firefox/Chrome answers recvonly.
+            if (this.localStream) {
+                const audioTrack = this.localStream.getAudioTracks()[0];
+
+                const audioTransceiver = pc
+                    .getTransceivers()
+                    .find((t) => t.receiver?.track?.kind === "audio" || t.mid === "audio");
+
+                if (audioTransceiver) {
+                    audioTransceiver.direction = "sendrecv";
+
+                    const audioTrack = this.localStream?.getAudioTracks()[0];
+                    if (audioTrack) {
+                        await audioTransceiver.sender.replaceTrack(audioTrack);
+                    }
+                }
+            }
+
             await this._flushPendingCandidates(peer);
             await pc.setLocalDescription();
-
             this.ws.send(
                 JSON.stringify({
                     type: "answer",
