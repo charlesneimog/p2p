@@ -164,7 +164,8 @@ class SimpleP2P {
         };
 
         pc.ontrack = (event) => {
-            this.onTrack(peerId, event.streams[0]);
+            const stream = event.streams[0] || new MediaStream([event.track]);
+            this.onTrack(peerId, stream);
         };
 
         pc.onconnectionstatechange = () => {
@@ -184,8 +185,7 @@ class SimpleP2P {
 
         // Automatic Negotiation Trigger
         pc.onnegotiationneeded = async () => {
-            console.log(pc);
-            if (pc.signalingState === "stable") return;
+            if (pc.signalingState !== "stable") return;
             try {
                 peer.makingOffer = true;
                 await pc.setLocalDescription();
@@ -223,6 +223,7 @@ class SimpleP2P {
 
         try {
             await pc.setRemoteDescription(new RTCSessionDescription(description));
+            await this._flushPendingCandidates(peer);
             await pc.setLocalDescription();
 
             this.ws.send(
@@ -246,17 +247,21 @@ class SimpleP2P {
             if (peer.pc.signalingState !== "have-local-offer") return;
 
             await peer.pc.setRemoteDescription(new RTCSessionDescription(answer));
-
-            while (peer.pendingCandidates.length > 0) {
-                const candidate = peer.pendingCandidates.shift();
-                try {
-                    await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
-                } catch (e) {
-                    this.onLog(`Failed to add queued ICE candidate: ${e.message}`);
-                }
-            }
+            await this._flushPendingCandidates(peer);
         } catch (err) {
             this.onError(err);
+        }
+    }
+
+    // ─────────────────────────────────────
+    async _flushPendingCandidates(peer) {
+        while (peer.pendingCandidates.length > 0) {
+            const candidate = peer.pendingCandidates.shift();
+            try {
+                await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (e) {
+                this.onLog(`Failed to add queued ICE candidate: ${e.message}`);
+            }
         }
     }
 

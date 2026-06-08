@@ -350,7 +350,7 @@
                 network.onLog = (msg) => console.log(msg);
                 network.onError = (msg) => addLog(`System Error: ${msg}`, "error");
 
-                network.onConnect = (myId) => {
+                network.onConnect = async (myId) => {
                     updateStatus(`Connected as ${name}`, "connected");
                     connectBtn.disabled = true;
                     disconnectBtn.disabled = false;
@@ -365,6 +365,29 @@
                     uiRefreshInterval = setInterval(() => {
                         if (network && network.peers.size > 0) renderPeers();
                     }, 1000);
+
+                    if (!network) {
+                        addLog("Context Error: Must join a room before initializing media devices.", "error");
+                        return;
+                    }
+
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({
+                            audio: {
+                                echoCancellation: false,
+                                noiseSuppression: false,
+                                autoGainControl: false,
+                                channelCount: 1,
+                            },
+                            video: false,
+                        });
+
+                        network.addMediaStream(stream);
+                        addLog("Hardware active. Mic added to local stream pool.", "success");
+                        initAudioBtn.disabled = true;
+                    } catch (err) {
+                        addLog(`Hardware Error: ${err.message}`, "error");
+                    }
                 };
 
                 network.onDisconnect = () => {
