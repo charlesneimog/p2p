@@ -63,7 +63,7 @@ cpmaddpackage(
 cpmaddpackage("gh:gabime/spdlog@1.17.0")
 set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-pd_add_external(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p~.cpp")
+pd_add_external(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p~.cpp")
 target_include_directories(p2p_tilde PRIVATE "${opus_SOURCE_DIR}/include")
 target_link_libraries(
     p2p_tilde

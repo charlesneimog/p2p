@@ -2,3 +2,4 @@
 /p2p-signaling/node_modules
 /.build
 /compile_commands.json
+/signaling-server/node_modules
