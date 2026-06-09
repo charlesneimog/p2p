@@ -40,6 +40,9 @@ struct P2PNode {
     bool is_polite{false};
     bool making_offer{false};
     bool ignore_offer{false};
+    bool answering_offer{false};
+    bool local_offer_sent{false};
+    bool polite_media_offer_sent{false};
 
     std::shared_ptr<rtc::WebSocket> ws;
     std::shared_ptr<rtc::PeerConnection> pc;
@@ -209,11 +212,33 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
     node->remote_description_set = false;
     p2p_safelogpost(x, PD_ERROR, "Pd is polite=%d", node->is_polite);
     node->pc->onLocalDescription([x, node](rtc::Description description) {
-        p2p_safelogpost(x, PD_DEBUG, "onLocalDescription %s", description.typeString().c_str());
+        const std::string type = description.typeString();
+        p2p_safelogpost(x, PD_DEBUG, "onLocalDescription %s", type.c_str());
+
+        if (type == "offer") {
+            const bool post_answer_offer = !node->making_offer && node->remote_description_set;
+            if (post_answer_offer) {
+                if (!node->is_polite || node->polite_media_offer_sent) {
+                    p2p_safelogpost(x, PD_DEBUG,
+                                    "Suppressing follow-up local offer for peer '%s'",
+                                    node->user.c_str());
+                    return;
+                }
+                node->polite_media_offer_sent = true;
+                p2p_safelogpost(x, PD_DEBUG,
+                                "Sending one polite media update offer for peer '%s'",
+                                node->user.c_str());
+            }
+            node->making_offer = false;
+            node->local_offer_sent = true;
+        } else if (type == "answer") {
+            node->answering_offer = false;
+        }
+
         if (node->ws) {
             json msg = {
-                {"type", description.typeString()},
-                {"sdp", {{"type", description.typeString()}, {"sdp", std::string(description)}}},
+                {"type", type},
+                {"sdp", {{"type", type}, {"sdp", std::string(description)}}},
                 {"to", node->remote_peer_id}};
             node->ws->send(msg.dump());
         } else {
@@ -276,11 +301,6 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
             track->setDescription(desc);
 
             install_sendrecv_handler(track);
-
-            if (node->pc->signalingState() ==
-                rtc::PeerConnection::SignalingState::HaveRemoteOffer) {
-                node->pc->setLocalDescription();
-            }
 
         } else {
             auto handler = std::make_shared<rtc::OpusRtpDepacketizer>();
@@ -399,6 +419,11 @@ static void p2p_disconnect(p2p_tilde *x) {
     for (auto &node : x->state->nodes) {
         node->is_streaming = false;
         node->remote_description_set = false;
+        node->making_offer = false;
+        node->ignore_offer = false;
+        node->answering_offer = false;
+        node->local_offer_sent = false;
+        node->polite_media_offer_sent = false;
         if (node->dc) {
             node->dc->close();
             node->dc.reset();
@@ -445,13 +470,15 @@ static void p2p_peer_join(p2p_tilde *x, json data) {
     bool should_be_caller = (x->state->local_peer_id < from_peer);
     node->is_polite = !should_be_caller;
     node->is_streaming = x->wants_stream;
+    node->making_offer = should_be_caller;
     p2p_setup_webrtc_for_node(x, node);
     x->peer_connected = p2p_count_active_nodes(x);
     clock_delay(x->report_clock, 0);
 
     if (should_be_caller) {
-        node->making_offer = true;
-        node->pc->setLocalDescription(); // Generates and sends offer
+        if (!node->local_offer_sent) {
+            node->pc->setLocalDescription(); // Generates and sends offer
+        }
     } else {
         p2p_safelogpost(x, PD_NORMAL, "Waiting for offer from %s (I am callee)", from_peer.c_str());
     }
@@ -475,6 +502,7 @@ static void p2p_offer(p2p_tilde *x, json data) {
         node->user = from_peer;
         bool should_be_caller = (x->state->local_peer_id < from_peer);
         node->is_polite = !should_be_caller;
+        node->making_offer = should_be_caller;
         p2p_setup_webrtc_for_node(x, node);
     }
 
@@ -505,13 +533,11 @@ static void p2p_offer(p2p_tilde *x, json data) {
         p2p_flush_pending_candidates(x, node);
 
         node->making_offer = false;
+        node->answering_offer = true;
 
-        // Do NOT immediately answer if this side is polite.
-        // onTrack() must first attach Pd's outgoing SSRC/handler.
-        if (!node->is_polite) {
-            node->pc->setLocalDescription();
-        }
+        node->pc->setLocalDescription();
     } catch (const std::exception &e) {
+        node->answering_offer = false;
         p2p_safelogpost(x, PD_ERROR, "Failed to set remote description (offer): %s", e.what());
     }
 }
@@ -529,10 +555,13 @@ static void p2p_existing_peers(p2p_tilde *x, json data) {
             node->ws = x->state->shared_ws;
             bool should_be_caller = (x->state->local_peer_id < peer_id);
             node->is_polite = !should_be_caller;
+            node->making_offer = should_be_caller;
             p2p_setup_webrtc_for_node(x, node);
-            if (should_be_caller) {
-                node->making_offer = true;
+            if (should_be_caller && !node->local_offer_sent) {
                 node->pc->setLocalDescription();
+                p2p_safelogpost(x, PD_NORMAL, "Connecting to existing peer '%s' (%s)",
+                                peer_name.c_str(), peer_id.substr(0, 6).c_str());
+            } else if (should_be_caller) {
                 p2p_safelogpost(x, PD_NORMAL, "Connecting to existing peer '%s' (%s)",
                                 peer_name.c_str(), peer_id.substr(0, 6).c_str());
             } else {
@@ -637,6 +666,11 @@ static void p2p_peerleft(p2p_tilde *x, json data) {
         p2p_safelogpost(x, PD_NORMAL, "Peer '%s' left", node->user.c_str());
         node->is_streaming = false;
         node->remote_description_set = false;
+        node->making_offer = false;
+        node->ignore_offer = false;
+        node->answering_offer = false;
+        node->local_offer_sent = false;
+        node->polite_media_offer_sent = false;
         if (node->dc) {
             node->dc->close();
             node->dc.reset();
@@ -988,7 +1022,7 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
         opus_encoder_ctl(node->opus_enc, OPUS_SET_APPLICATION(OPUS_APPLICATION_AUDIO));
         opus_encoder_ctl(node->opus_enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
 
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_BITRATE(192000)); // or 256000 stereo
+        opus_encoder_ctl(node->opus_enc, OPUS_SET_BITRATE(256000)); // or 256000 stereo
         opus_encoder_ctl(node->opus_enc, OPUS_SET_VBR(1));
         opus_encoder_ctl(node->opus_enc, OPUS_SET_VBR_CONSTRAINT(1));
         opus_encoder_ctl(node->opus_enc, OPUS_SET_COMPLEXITY(10));
@@ -1003,8 +1037,6 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
         node->tx_thread = std::thread([node_ptr = node.get()]() {
             constexpr int FRAME_SIZE = 480; // 10 ms at 48 kHz
             constexpr int MAX_OPUS_BYTES = 4000;
-            int frame = 0;
-
             float pcm_frame[FRAME_SIZE];
             unsigned char opus_payload[MAX_OPUS_BYTES];
 
@@ -1034,15 +1066,10 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
                 if (bytes <= 0) {
                     continue;
                 }
-                if (frame % 100 == 0) {
-                    p2p_safelogpost(nullptr, PD_ERROR, "Sending audio to peer %s",
-                                    node_ptr->user.c_str());
-                }
 
                 node_ptr->audio_track->send(reinterpret_cast<const std::byte *>(opus_payload),
                                             static_cast<size_t>(bytes));
                 node_ptr->rtp_config->timestamp += FRAME_SIZE;
-                frame++;
             }
         });
 
@@ -1081,7 +1108,7 @@ static void p2p_free(p2p_tilde *x) {
 
 // ─────────────────────────────────────
 extern "C" void p2p_tilde_setup(void) {
-    post("[p2p~] by Charles K. Neimog %d.%d.%d", 0, 1, 0);
+    post("[p2p~] by Charles K. Neimog %d.%d.%d (polite-media-offer-fix)", 0, 1, 0);
 
     p2p_tilde_class = class_new(gensym("p2p~"), (t_newmethod)p2p_new, (t_method)p2p_free,
                                 sizeof(p2p_tilde), CLASS_DEFAULT, A_GIMME, 0);

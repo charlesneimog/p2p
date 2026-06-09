@@ -106,16 +106,16 @@ class SimpleP2P {
             .find((t) => t.receiver?.track?.kind === "audio" || t.mid === "audio");
 
         if (transceiver?.sender) {
-            transceiver.direction = "sendrecv";
             await transceiver.sender.replaceTrack(audioTrack);
+            if (transceiver.currentDirection === "recvonly" || transceiver.direction === "recvonly") {
+                transceiver.direction = "sendrecv";
+            } else if (transceiver.currentDirection === "inactive" || transceiver.direction === "inactive") {
+                transceiver.direction = "sendonly";
+            }
         } else if (!peer.isPolite) {
-            const newTransceiver = peer.pc.addTransceiver(audioTrack, {
+            peer.pc.addTransceiver(audioTrack, {
                 direction: "sendrecv",
             });
-            // Trigger renegotiation
-            if (peer.pc.signalingState === "stable") {
-                peer.pc.onnegotiationneeded();
-            }
         }
     }
     // ─────────────────────────────────────
@@ -140,6 +140,7 @@ class SimpleP2P {
             dc: null,
             makingOffer: false,
             ignoreOffer: false,
+            needsNegotiation: false,
             pendingCandidates: [],
         };
 
@@ -159,8 +160,6 @@ class SimpleP2P {
     _createPeerConnection(peerId, peer) {
         const pc = new RTCPeerConnection(this.config);
 
-        let audioTransceiver = null;
-
         // Only the impolite side pre-creates offerable media.
         // If browser is polite, wait for Pd's offer to create the audio m-line.
         if (this.localStream) {
@@ -170,12 +169,8 @@ class SimpleP2P {
                     direction: "sendrecv",
                 });
             } else if (audioTrack) {
-                // For polite peers, just create a recvonly transceiver initially
-                pc.addTransceiver("audio", { direction: "recvonly" });
+                // Polite peers answer the offer's audio m-line instead of creating one early.
             }
-        } else if (!peer.isPolite) {
-            // No media yet, but create placeholder
-            pc.addTransceiver("audio", { direction: "sendrecv" });
         }
 
         pc.onicecandidate = (event) => {
@@ -197,7 +192,7 @@ class SimpleP2P {
 
         pc.onconnectionstatechange = () => {
             this.onLog(`Connection ${peerId}: ${pc.connectionState}`);
-            if (pc.connectionState === "failed") {
+            if (pc.connectionState === "failed" && pc.signalingState === "stable") {
                 pc.restartIce();
             }
         };
@@ -213,6 +208,10 @@ class SimpleP2P {
 
         pc.onnegotiationneeded = async () => {
             if (pc.signalingState !== "stable") return;
+            if (peer.makingOffer) {
+                peer.needsNegotiation = true;
+                return;
+            }
 
             try {
                 peer.makingOffer = true;
@@ -230,6 +229,10 @@ class SimpleP2P {
                 this.onError(new Error(`Negotiation failed: ${err.message}`));
             } finally {
                 peer.makingOffer = false;
+                if (peer.needsNegotiation && pc.signalingState === "stable") {
+                    peer.needsNegotiation = false;
+                    queueMicrotask(() => pc.onnegotiationneeded());
+                }
             }
         };
 
@@ -257,22 +260,7 @@ class SimpleP2P {
             // IMPORTANT: browser is polite/callee here.
             // Pd's offer created the audio transceiver.
             // Attach mic before creating the answer, otherwise Firefox/Chrome answers recvonly.
-            if (this.localStream) {
-                const audioTrack = this.localStream.getAudioTracks()[0];
-
-                const audioTransceiver = pc
-                    .getTransceivers()
-                    .find((t) => t.receiver?.track?.kind === "audio" || t.mid === "audio");
-
-                if (audioTransceiver) {
-                    audioTransceiver.direction = "sendrecv";
-
-                    const audioTrack = this.localStream?.getAudioTracks()[0];
-                    if (audioTrack) {
-                        await audioTransceiver.sender.replaceTrack(audioTrack);
-                    }
-                }
-            }
+            await this._configureAudioAnswer(pc, description);
 
             await this._flushPendingCandidates(peer);
             await pc.setLocalDescription();
@@ -285,6 +273,39 @@ class SimpleP2P {
             );
         } catch (err) {
             this.onError(new Error(`Failed to handle offer: ${err.message}`));
+        }
+    }
+
+    // ─────────────────────────────────────
+    _audioOfferDirection(description) {
+        const sdp = description?.sdp || "";
+        const audio = sdp.match(/(^|\r?\n)m=audio[\s\S]*?(?=\r?\nm=|$)/);
+        if (!audio) return null;
+
+        const section = audio[0];
+        const direction = section.match(/\r?\na=(sendrecv|sendonly|recvonly|inactive)(\r?\n|$)/);
+        return direction ? direction[1] : "sendrecv";
+    }
+
+    // ─────────────────────────────────────
+    async _configureAudioAnswer(pc, offer) {
+        const offerDirection = this._audioOfferDirection(offer);
+        if (!offerDirection || offerDirection === "inactive") return;
+
+        const audioTrack = this.localStream?.getAudioTracks()[0] || null;
+        const audioTransceiver = pc
+            .getTransceivers()
+            .find((t) => t.receiver?.track?.kind === "audio" || t.sender?.track?.kind === "audio");
+
+        if (!audioTransceiver) return;
+
+        if (audioTrack && (offerDirection === "sendrecv" || offerDirection === "recvonly")) {
+            await audioTransceiver.sender.replaceTrack(audioTrack);
+            audioTransceiver.direction = offerDirection === "sendrecv" ? "sendrecv" : "sendonly";
+        } else if (offerDirection === "sendrecv" || offerDirection === "sendonly") {
+            audioTransceiver.direction = "recvonly";
+        } else {
+            audioTransceiver.direction = "inactive";
         }
     }
 
