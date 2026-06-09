@@ -210,7 +210,7 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
     config.iceServers.emplace_back("stun:stun.l.google.com:19302");
     node->pc = std::make_shared<rtc::PeerConnection>(config);
     node->remote_description_set = false;
-    p2p_safelogpost(x, PD_ERROR, "Pd is polite=%d", node->is_polite);
+    p2p_safelogpost(x, PD_DEBUG, "Pd is polite=%d", node->is_polite);
     node->pc->onLocalDescription([x, node](rtc::Description description) {
         const std::string type = description.typeString();
         p2p_safelogpost(x, PD_DEBUG, "onLocalDescription %s", type.c_str());
@@ -219,14 +219,12 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
             const bool post_answer_offer = !node->making_offer && node->remote_description_set;
             if (post_answer_offer) {
                 if (!node->is_polite || node->polite_media_offer_sent) {
-                    p2p_safelogpost(x, PD_DEBUG,
-                                    "Suppressing follow-up local offer for peer '%s'",
+                    p2p_safelogpost(x, PD_DEBUG, "Suppressing follow-up local offer for peer '%s'",
                                     node->user.c_str());
                     return;
                 }
                 node->polite_media_offer_sent = true;
-                p2p_safelogpost(x, PD_DEBUG,
-                                "Sending one polite media update offer for peer '%s'",
+                p2p_safelogpost(x, PD_DEBUG, "Sending one polite media update offer for peer '%s'",
                                 node->user.c_str());
             }
             node->making_offer = false;
@@ -236,10 +234,9 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
         }
 
         if (node->ws) {
-            json msg = {
-                {"type", type},
-                {"sdp", {{"type", type}, {"sdp", std::string(description)}}},
-                {"to", node->remote_peer_id}};
+            json msg = {{"type", type},
+                        {"sdp", {{"type", type}, {"sdp", std::string(description)}}},
+                        {"to", node->remote_peer_id}};
             node->ws->send(msg.dump());
         } else {
             p2p_safelogpost(x, PD_ERROR, "Error: WebSocket missing onLocalDescription");
