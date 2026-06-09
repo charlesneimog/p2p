@@ -970,6 +970,10 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
     x->state = new p2p_state();
     spdlog::set_level(spdlog::level::debug);
 
+    if (sys_getsr() != 48000) {
+        pd_error(x, "[p2p~] Expects sampleRate of 48000Hz");
+    }
+
     bool user_had_other_flags = false;
     for (int i = 0; i < argc; i++) {
         if (argv[i].a_type == A_SYMBOL) {
@@ -1078,7 +1082,6 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
         x->max_out_channels = 8;
     }
 
-    post("[p2p~] Max output channels: %d", x->max_out_channels);
     x->out_signals = outlet_new(&x->x_obj, &s_signal);
     x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
     x->report_clock = clock_new(&x->x_obj, (t_method)p2p_report);
@@ -1105,7 +1108,7 @@ static void p2p_free(p2p_tilde *x) {
 
 // ─────────────────────────────────────
 extern "C" void p2p_tilde_setup(void) {
-    post("[p2p~] by Charles K. Neimog %d.%d.%d (polite-media-offer-fix)", 0, 1, 0);
+    post("[p2p~] by Charles K. Neimog %d.%d.%d", 0, 1, 1);
 
     p2p_tilde_class = class_new(gensym("p2p~"), (t_newmethod)p2p_new, (t_method)p2p_free,
                                 sizeof(p2p_tilde), CLASS_DEFAULT, A_GIMME, 0);
