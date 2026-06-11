@@ -61,7 +61,7 @@
 
             .controls {
                 display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto auto;
+                grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(140px, 0.7fr) auto auto auto;
                 gap: 12px;
                 align-items: end;
                 padding: 16px;
@@ -83,6 +83,14 @@
                 font: inherit;
                 color: #171717;
                 background: #fbfbf8;
+            }
+
+            input[type="range"] {
+                height: 42px;
+                border: 0;
+                padding: 0;
+                accent-color: #171717;
+                background: transparent;
             }
 
             button {
@@ -152,6 +160,10 @@
                 background: #111111;
             }
 
+            #remote-mix {
+                display: none;
+            }
+
             #sketch-container,
             #sketch-container canvas {
                 position: absolute;
@@ -174,6 +186,20 @@
 
             .empty[hidden] {
                 display: none;
+            }
+
+            .mix-count {
+                position: absolute;
+                top: 12px;
+                right: 12px;
+                z-index: 2;
+                padding: 6px 10px;
+                border-radius: 6px;
+                color: #f0f0ea;
+                background: rgb(17 17 17 / 0.72);
+                font-size: 12px;
+                font-weight: 700;
+                pointer-events: none;
             }
 
             .log {
@@ -232,6 +258,10 @@
                     User name
                     <input id="user-name" type="text" />
                 </label>
+                <label>
+                    Noise
+                    <input id="noise-amount" type="range" min="0" max="1" step="0.01" value="0.7" />
+                </label>
                 <button class="primary" id="btn-connect" type="button">Connect</button>
                 <button class="secondary" id="btn-disconnect" type="button" disabled>Disconnect</button>
                 <button class="secondary" id="btn-fullscreen" type="button">Fullscreen</button>
@@ -240,8 +270,9 @@
             <div class="status" id="status">Disconnected</div>
 
             <section class="stage" aria-label="Remote video">
-                <video id="remote-video" autoplay playsinline controls></video>
+                <canvas id="remote-mix"></canvas>
                 <div id="sketch-container"></div>
+                <div class="mix-count" id="mix-count">0 sources</div>
                 <div class="empty" id="empty-state">Waiting for remote video...</div>
             </section>
 

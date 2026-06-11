@@ -1,10 +1,11 @@
-let remoteVideoP5;
+let remoteVideoSource;
 let sketchContainer;
 let gl;
 let shaderProgram;
 let videoTexture;
 let positionBuffer;
 let texCoordBuffer;
+let noiseAmountInput;
 
 const vertexShaderSource = `
 attribute vec2 aPosition;
@@ -103,7 +104,8 @@ void main() {
 
 function setup() {
     sketchContainer = document.getElementById("sketch-container");
-    remoteVideoP5 = document.getElementById("remote-video");
+    remoteVideoSource = window.remoteVideoMixer?.source || document.getElementById("remote-mix");
+    noiseAmountInput = document.getElementById("noise-amount");
 
     pixelDensity(1);
     const canvas = createCanvas(sketchContainer.clientWidth, sketchContainer.clientHeight, WEBGL);
@@ -115,7 +117,7 @@ function setup() {
 }
 
 function draw() {
-    if (!remoteVideoP5 || remoteVideoP5.readyState < 2) {
+    if (!remoteVideoSource || !window.remoteVideoMixer?.hasActiveVideos()) {
         if (gl) {
             gl.clearColor(0, 0, 0, 1);
             gl.clear(gl.COLOR_BUFFER_BIT);
@@ -171,17 +173,22 @@ function drawVideoFrame() {
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, videoTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, remoteVideoP5);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, remoteVideoSource);
 
     const videoLocation = gl.getUniformLocation(shaderProgram, "uVideo");
     gl.uniform1i(videoLocation, 0);
     gl.uniform1f(gl.getUniformLocation(shaderProgram, "uTime"), millis() / 1000);
-    gl.uniform1f(gl.getUniformLocation(shaderProgram, "uNoiseAmount"), 0.7);
+    gl.uniform1f(gl.getUniformLocation(shaderProgram, "uNoiseAmount"), getNoiseAmount());
 
     bindAttribute("aPosition", positionBuffer, 2);
     bindAttribute("aTexCoord", texCoordBuffer, 2);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function getNoiseAmount() {
+    const value = Number.parseFloat(noiseAmountInput?.value);
+    return Number.isFinite(value) ? value : 0.7;
 }
 
 function setGpuViewport() {
@@ -190,8 +197,8 @@ function setGpuViewport() {
 }
 
 function updateVideoQuad() {
-    const videoWidth = remoteVideoP5.videoWidth || width;
-    const videoHeight = remoteVideoP5.videoHeight || height;
+    const videoWidth = remoteVideoSource.width || width;
+    const videoHeight = remoteVideoSource.height || height;
     const canvasAspect = gl.drawingBufferWidth / gl.drawingBufferHeight;
     const videoAspect = videoWidth / videoHeight;
     let quadWidth = 1;

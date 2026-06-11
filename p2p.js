@@ -7,6 +7,10 @@ class SimpleP2P {
         this.ws = null;
         this.peers = new Map();
         this.localStream = null;
+        this.mediaDirections = {
+            audio: SimpleP2P.Direction.SendRecv,
+            video: SimpleP2P.Direction.SendRecv,
+        };
 
         this.config = {
             iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -86,48 +90,61 @@ class SimpleP2P {
     }
 
     // ─────────────────────────────────────
-    async addAudioStream(stream) {
-        this._mergeLocalStream(stream);
-        const audioTrack = stream.getAudioTracks()[0];
-        if (!audioTrack) return;
+    async addAudioStream(stream, direction = SimpleP2P.Direction.SendRecv) {
+        direction = this._normalizeDirection(direction);
+        this.mediaDirections.audio = direction;
+
+        const audioTrack = stream?.getAudioTracks?.()[0] || null;
+        this._mergeLocalTrack(audioTrack, direction);
+        if (!audioTrack && this._directionSends(direction)) return;
+
         for (const [peerId, peer] of this.peers.entries()) {
-            await this._addTrackToPeer(peer, audioTrack, "audio");
+            await this._addTrackToPeer(peer, audioTrack, "audio", direction);
         }
     }
 
     // ─────────────────────────────────────
-    async addVideoStream(stream) {
-        this._mergeLocalStream(stream);
-        const videoTrack = stream.getVideoTracks()[0];
-        if (!videoTrack) return;
+    async addVideoStream(stream, direction = SimpleP2P.Direction.SendRecv) {
+        direction = this._normalizeDirection(direction);
+        this.mediaDirections.video = direction;
+
+        const videoTrack = stream?.getVideoTracks?.()[0] || null;
+        this._mergeLocalTrack(videoTrack, direction);
+        if (!videoTrack && this._directionSends(direction)) return;
+
         for (const [peerId, peer] of this.peers.entries()) {
-            await this._addTrackToPeer(peer, videoTrack, "video");
+            await this._addTrackToPeer(peer, videoTrack, "video", direction);
         }
     }
 
     // ─────────────────────────────────────
-    async addMediaStream(stream) {
-        await this.addAudioStream(stream);
-        await this.addVideoStream(stream);
+    async addMediaStream(stream, options = {}) {
+        const mediaOptions = typeof options === "object" && options !== null ? options : {};
+        const defaultDirection = typeof options === "string" ? options : mediaOptions.direction;
+        const audioDirection = mediaOptions.audioDirection || defaultDirection || SimpleP2P.Direction.SendRecv;
+        const videoDirection = mediaOptions.videoDirection || defaultDirection || SimpleP2P.Direction.SendRecv;
+
+        await this.addAudioStream(stream, audioDirection);
+        await this.addVideoStream(stream, videoDirection);
     }
 
     // ─────────────────────────────────────
-    _mergeLocalStream(stream) {
+    _mergeLocalTrack(track, direction) {
+        if (!track || !this._directionSends(direction)) return;
+
         if (!this.localStream) {
             this.localStream = new MediaStream();
         }
 
-        for (const track of stream.getTracks()) {
-            const existingTrack = this.localStream.getTracks().find((localTrack) => localTrack.kind === track.kind);
-            if (existingTrack) {
-                this.localStream.removeTrack(existingTrack);
-            }
-            this.localStream.addTrack(track);
+        const existingTrack = this.localStream.getTracks().find((localTrack) => localTrack.kind === track.kind);
+        if (existingTrack) {
+            this.localStream.removeTrack(existingTrack);
         }
+        this.localStream.addTrack(track);
     }
 
     // ─────────────────────────────────────
-    async _addTrackToPeer(peer, track, kind) {
+    async _addTrackToPeer(peer, track, kind, direction = SimpleP2P.Direction.SendRecv) {
         if (!peer.pc) return;
 
         const transceiver = peer.pc
@@ -135,17 +152,32 @@ class SimpleP2P {
             .find((t) => t.receiver?.track?.kind === kind || t.sender?.track?.kind === kind || t.mid === kind);
 
         if (transceiver?.sender) {
-            await transceiver.sender.replaceTrack(track);
-            if (transceiver.currentDirection === "recvonly" || transceiver.direction === "recvonly") {
-                transceiver.direction = "sendrecv";
-            } else if (transceiver.currentDirection === "inactive" || transceiver.direction === "inactive") {
-                transceiver.direction = "sendonly";
-            }
+            await transceiver.sender.replaceTrack(this._directionSends(direction) ? track : null);
+            transceiver.direction = direction;
         } else if (!peer.isPolite) {
-            peer.pc.addTransceiver(track, {
-                direction: "sendrecv",
-            });
+            if (track && this._directionSends(direction)) {
+                peer.pc.addTransceiver(track, { direction });
+            } else {
+                peer.pc.addTransceiver(kind, { direction });
+            }
         }
+    }
+
+    // ─────────────────────────────────────
+    _normalizeDirection(direction) {
+        const value = String(direction || "").toLowerCase();
+        if (Object.values(SimpleP2P.Direction).includes(value)) return value;
+        throw new Error(`Invalid media direction: ${direction}`);
+    }
+
+    // ─────────────────────────────────────
+    _directionSends(direction) {
+        return direction === SimpleP2P.Direction.SendOnly || direction === SimpleP2P.Direction.SendRecv;
+    }
+
+    // ─────────────────────────────────────
+    _directionReceives(direction) {
+        return direction === SimpleP2P.Direction.RecvOnly || direction === SimpleP2P.Direction.SendRecv;
     }
     // ─────────────────────────────────────
     broadcast(data) {
@@ -191,16 +223,17 @@ class SimpleP2P {
 
         // Only the impolite side pre-creates offerable media.
         // If browser is polite, wait for Pd's offer to create media m-lines.
-        if (this.localStream) {
-            for (const track of this.localStream.getTracks()) {
-                if (!peer.isPolite) {
-                    pc.addTransceiver(track, {
-                        direction: "sendrecv",
-                    });
-                } else {
-                    // Polite peers answer the offer's m-lines instead of creating them early.
+        if (!peer.isPolite) {
+            for (const [kind, direction] of Object.entries(this.mediaDirections)) {
+                const track = this.localStream?.getTracks().find((localTrack) => localTrack.kind === kind) || null;
+                if (track && this._directionSends(direction)) {
+                    pc.addTransceiver(track, { direction });
+                } else if (direction === SimpleP2P.Direction.RecvOnly) {
+                    pc.addTransceiver(kind, { direction });
                 }
             }
+        } else {
+            // Polite peers answer the offer's m-lines instead of creating them early.
         }
 
         pc.onicecandidate = (event) => {
@@ -321,6 +354,7 @@ class SimpleP2P {
         const offerDirection = this._mediaOfferDirection(offer, kind);
         if (!offerDirection || offerDirection === "inactive") return;
 
+        const desiredDirection = this.mediaDirections[kind] || SimpleP2P.Direction.SendRecv;
         const track = this.localStream?.getTracks().find((localTrack) => localTrack.kind === kind) || null;
         const transceiver = pc
             .getTransceivers()
@@ -328,13 +362,33 @@ class SimpleP2P {
 
         if (!transceiver) return;
 
-        if (track && (offerDirection === "sendrecv" || offerDirection === "recvonly")) {
+        const answerDirection = this._answerDirection(offerDirection, desiredDirection, Boolean(track));
+        if (this._directionSends(answerDirection)) {
             await transceiver.sender.replaceTrack(track);
-            transceiver.direction = offerDirection === "sendrecv" ? "sendrecv" : "sendonly";
-        } else if (offerDirection === "sendrecv" || offerDirection === "sendonly") {
-            transceiver.direction = "recvonly";
+        } else if (transceiver.sender) {
+            await transceiver.sender.replaceTrack(null);
+        }
+        transceiver.direction = answerDirection;
+    }
+
+    // ─────────────────────────────────────
+    _answerDirection(offerDirection, desiredDirection, hasSendTrack) {
+        const canSend = this._directionSends(desiredDirection) && hasSendTrack;
+        const canReceive = this._directionReceives(desiredDirection);
+        const remoteCanReceive = offerDirection === "sendrecv" || offerDirection === "recvonly";
+        const remoteCanSend = offerDirection === "sendrecv" || offerDirection === "sendonly";
+
+        const answerSends = canSend && remoteCanReceive;
+        const answerReceives = canReceive && remoteCanSend;
+
+        if (answerSends && answerReceives) {
+            return SimpleP2P.Direction.SendRecv;
+        } else if (answerSends) {
+            return SimpleP2P.Direction.SendOnly;
+        } else if (answerReceives) {
+            return SimpleP2P.Direction.RecvOnly;
         } else {
-            transceiver.direction = "inactive";
+            return SimpleP2P.Direction.Inactive;
         }
     }
 
@@ -413,3 +467,10 @@ class SimpleP2P {
         this.onPeerLeave(peerId);
     }
 }
+
+SimpleP2P.Direction = Object.freeze({
+    SendOnly: "sendonly",
+    RecvOnly: "recvonly",
+    SendRecv: "sendrecv",
+    Inactive: "inactive",
+});

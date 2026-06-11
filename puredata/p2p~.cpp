@@ -125,6 +125,7 @@ struct p2p_tilde {
     char **json_keys;
     int json_keys_count;
 
+    rtc::Description::Direction direction;
     p2p_state *state;
     t_symbol *username;
     t_symbol *room;
@@ -262,7 +263,7 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
 
     // Offerer creates the audio m-line.
     if (!node->is_polite) {
-        rtc::Description::Audio audio("audio", rtc::Description::Direction::SendRecv);
+        rtc::Description::Audio audio("audio", x->direction);
         audio.addOpusCodec(109);
         audio.addSSRC(node->audio_ssrc, "audio");
         node->audio_track = node->pc->addTrack(audio);
@@ -1019,6 +1020,7 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
     x->fixchannels = false;
     x->json = false;
     x->state = new p2p_state();
+    x->direction = rtc::Description::Direction::SendRecv;
     spdlog::set_level(spdlog::level::debug);
 
     if (sys_getsr() != 48000) {
@@ -1040,6 +1042,15 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
                 x->fixchannels = true;
                 x->multichannel = true;
                 user_had_other_flags = true;
+            } else if (strcmp(flag, "-sr") == 0) {
+                x->direction = rtc::Description::Direction::SendRecv;
+                p2p_safelogpost(x, PD_NORMAL, "Send and Receive Audio");
+            } else if (strcmp(flag, "-s") == 0) {
+                x->direction = rtc::Description::Direction::SendOnly;
+                p2p_safelogpost(x, PD_NORMAL, "Only Send Audio");
+            } else if (strcmp(flag, "-r") == 0) {
+                x->direction = rtc::Description::Direction::RecvOnly;
+                p2p_safelogpost(x, PD_NORMAL, "Only Receive Audio");
             } else {
                 p2p_safelogpost(x, PD_ERROR, "Unknown flag: %s", argv[i].a_w.w_symbol->s_name);
             }
@@ -1137,18 +1148,14 @@ static void p2p_free(p2p_tilde *x) {
             if (!node) {
                 continue;
             }
-
             node->thread_running = false;
-
             if (node->pc) {
                 node->pc->close();
             }
         }
-
         if (x->state->shared_ws) {
             x->state->shared_ws->close();
         }
-
         delete x->state;
         x->state = nullptr;
     }

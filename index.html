@@ -450,8 +450,8 @@
                         });
 
                         localVideo.srcObject = stream;
-                        await network.addAudioStream(stream);
-                        await network.addVideoStream(stream);
+                        await network.addAudioStream(stream, SimpleP2P.Direction.SendOnly);
+                        await network.addVideoStream(stream, SimpleP2P.Direction.SendOnly);
                         addLog("Hardware active. Mic and camera added to local stream pool.", "success");
                     } catch (err) {
                         addLog(`Hardware Error: ${err.message}`, "error");
@@ -485,12 +485,6 @@
                 };
 
                 network.onPeerLeave = (peerId) => {
-                    const audioElement = document.getElementById(`audio-${peerId}`);
-                    if (audioElement) {
-                        audioElement.pause();
-                        audioElement.srcObject = null;
-                        audioElement.remove();
-                    }
                     const videoElement = document.getElementById(`video-${peerId}`);
                     if (videoElement) {
                         videoElement.pause();
@@ -513,35 +507,13 @@
                 };
 
                 network.onTrack = (peerId, remoteStream, track) => {
-                    if (track?.kind === "video") {
-                        addLog(`Receiving video stream from ${peerId}`, "success");
-                        const videoEl = ensureRemoteVideo(peerId);
-                        videoEl.srcObject = remoteStream;
-                        videoEl.play().catch((err) => {
-                            addLog(`Video play failed for ${peerId}: ${err.message}`, "error");
-                        });
-                        return;
-                    }
+                    if (track?.kind !== "video") return;
 
-                    addLog(
-                        `Receiving audio stream from ${peerId} tracks=${remoteStream.getAudioTracks().length}`,
-                        "success",
-                    );
-
-                    let audioEl = document.getElementById(`audio-${peerId}`);
-                    if (!audioEl) {
-                        audioEl = document.createElement("audio");
-                        audioEl.id = `audio-${peerId}`;
-                        audioEl.autoplay = true;
-                        audioEl.playsInline = true;
-                        audioEl.controls = true; // temporary debug
-                        document.body.appendChild(audioEl);
-                    }
-
-                    audioEl.srcObject = remoteStream;
-
-                    audioEl.play().catch((err) => {
-                        addLog(`Audio play failed for ${peerId}: ${err.message}`, "error");
+                    addLog(`Receiving video stream from ${peerId}`, "success");
+                    const videoEl = ensureRemoteVideo(peerId);
+                    videoEl.srcObject = remoteStream;
+                    videoEl.play().catch((err) => {
+                        addLog(`Video play failed for ${peerId}: ${err.message}`, "error");
                     });
                 };
 
