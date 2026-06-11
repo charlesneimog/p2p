@@ -209,6 +209,49 @@
             </section>
 
             <section
+                class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-4 shadow-sm"
+            >
+                <header class="flex justify-between items-center">
+                    <h2 class="font-headline-md text-headline-md text-on-background">Audio</h2>
+                    <span class="material-symbols-outlined text-on-surface-variant">mic</span>
+                </header>
+                <div class="grid grid-cols-1">
+                    <div>
+                        <button class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all" id="btn-init-mic">Test 1</button>
+                        <button class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all" id="btn-init-mic">Test 2</button>
+
+                    </div>
+                </div>
+            </section>
+
+
+            <section
+                class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-4 shadow-sm"
+            >
+                <header class="flex justify-between items-center">
+                    <h2 class="font-headline-md text-headline-md text-on-background">Video</h2>
+                    <span class="material-symbols-outlined text-on-surface-variant">videocam</span>
+                </header>
+                <div class="grid grid-cols-1">
+                    <div>
+                        <button class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all" id="btn-init-mic">Test 1</button>
+                        <button class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all" id="btn-init-mic">Test 2</button>
+
+                    </div>
+                        
+                    </button>
+                        <span class="font-label-sm text-label-sm text-secondary">Local</span>
+                        <video
+                            autoplay
+                            class="w-full aspect-video bg-inverse-surface rounded-lg border border-outline-variant object-cover"
+                            id="local-video"
+                            muted
+                            playsinline
+                        ></video>
+                </div>
+            </section>
+
+            <section
                 class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-6 shadow-sm"
             >
                 <header>
@@ -249,6 +292,8 @@
             const peerCount = document.getElementById("peer-count");
             const logDiv = document.getElementById("console-log");
             const sendMsgBtn = document.getElementById("btn-test-msg");
+            const localVideo = document.getElementById("local-video");
+            //const remoteVideos = document.getElementById("remote-videos");
             //const initAudioBtn = document.getElementById("btn-init-mic");
 
             let network = null;
@@ -320,6 +365,31 @@
                 peersListDiv.innerHTML = html;
             }
 
+            function renderEmptyVideoState() {
+                if (remoteVideos.children.length === 0) {
+                    remoteVideos.innerHTML =
+                        '<p class="font-body-md text-body-md text-secondary w-full text-center py-8 italic">No remote video</p>';
+                }
+            }
+
+            function ensureRemoteVideo(peerId) {
+                const placeholder = remoteVideos.querySelector("p");
+                if (placeholder) placeholder.remove();
+
+                let videoEl = document.getElementById(`video-${peerId}`);
+                if (!videoEl) {
+                    videoEl = document.createElement("video");
+                    videoEl.id = `video-${peerId}`;
+                    videoEl.autoplay = true;
+                    videoEl.playsInline = true;
+                    videoEl.controls = true;
+                    videoEl.className =
+                        "w-full aspect-video bg-inverse-surface rounded-lg border border-outline-variant object-cover";
+                    remoteVideos.appendChild(videoEl);
+                }
+                return videoEl;
+            }
+
             // Connection Logic
             connectBtn.onclick = () => {
                 const room = roomInput.value.trim();
@@ -372,11 +442,17 @@
                                 autoGainControl: false,
                                 channelCount: 1,
                             },
-                            video: false,
+                            video: {
+                                width: { ideal: 1900 },
+                                height: { ideal: 1080 },
+                                facingMode: "enviroment",
+                            },
                         });
 
-                        network.addMediaStream(stream);
-                        addLog("Hardware active. Mic added to local stream pool.", "success");
+                        localVideo.srcObject = stream;
+                        await network.addAudioStream(stream);
+                        await network.addVideoStream(stream);
+                        addLog("Hardware active. Mic and camera added to local stream pool.", "success");
                     } catch (err) {
                         addLog(`Hardware Error: ${err.message}`, "error");
                     }
@@ -392,6 +468,12 @@
                     sendMsgBtn.classList.add("opacity-50", "cursor-not-allowed");
 
                     if (uiRefreshInterval) clearInterval(uiRefreshInterval);
+                    if (localVideo.srcObject) {
+                        localVideo.srcObject.getTracks().forEach((track) => track.stop());
+                        localVideo.srcObject = null;
+                    }
+                    remoteVideos.innerHTML = "";
+                    //renderEmptyVideoState();
                     renderPeers();
                     addLog("Network connection terminated.", "error");
                     network = null;
@@ -409,6 +491,13 @@
                         audioElement.srcObject = null;
                         audioElement.remove();
                     }
+                    const videoElement = document.getElementById(`video-${peerId}`);
+                    if (videoElement) {
+                        videoElement.pause();
+                        videoElement.srcObject = null;
+                        videoElement.remove();
+                    }
+                   // renderEmptyVideoState();
                     addLog("Peer disconnected from room.", "info");
                     renderPeers();
                 };
@@ -423,7 +512,17 @@
                     }
                 };
 
-                network.onTrack = (peerId, remoteStream) => {
+                network.onTrack = (peerId, remoteStream, track) => {
+                    if (track?.kind === "video") {
+                        addLog(`Receiving video stream from ${peerId}`, "success");
+                        const videoEl = ensureRemoteVideo(peerId);
+                        videoEl.srcObject = remoteStream;
+                        videoEl.play().catch((err) => {
+                            addLog(`Video play failed for ${peerId}: ${err.message}`, "error");
+                        });
+                        return;
+                    }
+
                     addLog(
                         `Receiving audio stream from ${peerId} tracks=${remoteStream.getAudioTracks().length}`,
                         "success",

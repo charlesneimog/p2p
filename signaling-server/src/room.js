@@ -11,6 +11,7 @@ export class Room {
         const allowedOrigins = [
             "https://charlesneimog.github.io",
             "http://localhost:5004",
+            "https://test.charlesneimog.duckdns.org",
             "https://test.charlesneimog.duckdns.org/",
             // something else
         ];

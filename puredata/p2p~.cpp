@@ -22,6 +22,7 @@
 #include <boost/lockfree/spsc_queue.hpp>
 
 using json = nlohmann::json;
+static t_class *p2p_class;
 static t_class *p2p_tilde_class;
 
 // ─────────────────────────────────────
@@ -100,7 +101,6 @@ struct p2p_state {
     std::vector<std::unique_ptr<P2PNode>> nodes;
     std::shared_ptr<rtc::WebSocket> shared_ws;
     std::unordered_map<std::string, int> peers_channels;
-    std::string jsonkey;
 };
 
 // ─────────────────────────────────────
@@ -120,9 +120,15 @@ struct p2p_tilde {
     t_outlet *out_signals;
     t_outlet *out_msgs;
 
+    // json
+    t_outlet **out_json_keys;
+    char **json_keys;
+    int json_keys_count;
+
     p2p_state *state;
     t_symbol *username;
     t_symbol *room;
+    char *jsonkey;
 };
 
 // ─────────────────────────────────────
@@ -805,17 +811,22 @@ static void p2p_message(p2p_tilde *x, t_symbol *, int argc, t_atom *argv) {
 
 // ─────────────────────────────────────
 static void p2p_json(p2p_tilde *x, t_symbol *s, int argc, t_atom *argv) {
-    if (argc == 0) {
+    if (argc == 0 && (strcmp("json", s->s_name) == 0)) {
         pd_error(x, "[p2p~] Message is empty");
         return;
     }
 
+    t_symbol *json_str;
+    if (strcmp("json", s->s_name) == 0) {
+        json_str = atom_getsymbol(argv);
+    } else {
+        json_str = s;
+    }
+
     try {
-        post("mesage");
-        t_symbol *json_str = atom_getsymbol(argv);
         json message = json::parse(json_str->s_name);
-        if (message.contains(x->state->jsonkey)) {
-            std::string value = message[x->state->jsonkey];
+        if (message.contains(x->jsonkey)) {
+            std::string value = message[x->jsonkey];
             std::vector<t_atom> atoms;
             char *buf = strdup(value.c_str());
             char *tok = strtok(buf, " ");
@@ -838,6 +849,13 @@ static void p2p_json(p2p_tilde *x, t_symbol *s, int argc, t_atom *argv) {
     } catch (const json::parse_error &e) {
         p2p_safelogpost(x, PD_ERROR, "Invalid JSON: %s", e.what());
     }
+}
+
+// ─────────────────────────────────────
+static void p2p_json_symbol(p2p_tilde *x, t_symbol *s) {
+    t_atom atoms[1];
+    SETSYMBOL(atoms, s);
+    p2p_json(x, gensym("json"), 1, atoms);
 }
 
 // ─────────────────────────────────────
@@ -961,7 +979,40 @@ static void p2p_dsp(p2p_tilde *x, t_signal **sp) {
 
 // ─────────────────────────────────────
 static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
-    p2p_tilde *x = (p2p_tilde *)pd_new(p2p_tilde_class);
+    p2p_tilde *x;
+
+    if (strcmp(s->s_name, "p2p") == 0) {
+        x = (p2p_tilde *)pd_new(p2p_class);
+        x->json_keys_count = argc;
+        x->out_json_keys = (t_outlet **)getbytes(argc * sizeof(*x->out_json_keys));
+        x->json_keys = (char **)getbytes(argc * sizeof(*x->json_keys));
+        if (!x->out_json_keys || !x->json_keys) {
+            if (x->out_json_keys) {
+                freebytes(x->out_json_keys, argc * sizeof(*x->out_json_keys));
+            }
+            if (x->json_keys) {
+                freebytes(x->json_keys, argc * sizeof(*x->json_keys));
+            }
+            x->out_json_keys = NULL;
+            x->json_keys = NULL;
+            x->json_keys_count = 0;
+            pd_error(x, "could not allocate memory for p2p keys");
+            return NULL;
+        }
+
+        for (int i = 0; i < argc; i++) {
+            x->out_json_keys[i] = outlet_new(&x->x_obj, &s_anything);
+            if (argv[i].a_type == A_SYMBOL) {
+                x->json_keys[i] = strdup(atom_getsymbol(argv + i)->s_name);
+            } else {
+                x->json_keys[i] = NULL;
+            }
+        }
+
+        return x;
+    }
+
+    x = (p2p_tilde *)pd_new(p2p_tilde_class);
     x->peer_connected = 0;
     x->multichannel = false;
     x->max_out_channels = 8;
@@ -989,20 +1040,6 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
                 x->fixchannels = true;
                 x->multichannel = true;
                 user_had_other_flags = true;
-            } else if (strcmp(flag, "-json") == 0) {
-                if (i + 1 >= argc) {
-                    pd_error(x, "[p2p~] -json requires a key for processing");
-                    return nullptr;
-                }
-
-                if (user_had_other_flags) {
-                    pd_error(x, "[p2p~] Ignoring other flags");
-                }
-                x->json = true;
-                x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
-                x->state->jsonkey = atom_getsymbol(argv + i + 1)->s_name;
-                return x;
-
             } else {
                 p2p_safelogpost(x, PD_ERROR, "Unknown flag: %s", argv[i].a_w.w_symbol->s_name);
             }
@@ -1091,19 +1128,35 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
 
 // ─────────────────────────────────────
 static void p2p_free(p2p_tilde *x) {
-    for (auto &node : x->state->nodes) {
-        node->thread_running = false;
-        if (node->pc) {
-            node->pc->close();
+    if (!x) {
+        return;
+    }
+
+    if (x->state) {
+        for (auto &node : x->state->nodes) {
+            if (!node) {
+                continue;
+            }
+
+            node->thread_running = false;
+
+            if (node->pc) {
+                node->pc->close();
+            }
         }
+
+        if (x->state->shared_ws) {
+            x->state->shared_ws->close();
+        }
+
+        delete x->state;
+        x->state = nullptr;
     }
-    if (x->state->shared_ws) {
-        x->state->shared_ws->close();
-    }
+
     if (x->report_clock) {
         clock_free(x->report_clock);
+        x->report_clock = nullptr;
     }
-    delete x->state;
 }
 
 // ─────────────────────────────────────
@@ -1122,5 +1175,10 @@ extern "C" void p2p_tilde_setup(void) {
     class_addmethod(p2p_tilde_class, (t_method)p2p_message, gensym("message"), A_GIMME, 0);
     class_addmethod(p2p_tilde_class, (t_method)p2p_channel, gensym("setchannel"), A_SYMBOL, A_FLOAT,
                     0);
-    class_addmethod(p2p_tilde_class, (t_method)p2p_json, gensym("json"), A_GIMME, 0);
+
+    // p2p json
+    p2p_class = class_new(gensym("p2p"), (t_newmethod)p2p_new, (t_method)p2p_free,
+                          sizeof(p2p_tilde), CLASS_DEFAULT, A_GIMME, 0);
+    class_addmethod(p2p_class, (t_method)p2p_json, gensym("json"), A_GIMME, 0);
+    class_addanything(p2p_class, (t_method)p2p_json);
 }

@@ -86,34 +86,63 @@ class SimpleP2P {
     }
 
     // ─────────────────────────────────────
-    async addMediaStream(stream) {
-        this.localStream = stream;
+    async addAudioStream(stream) {
+        this._mergeLocalStream(stream);
         const audioTrack = stream.getAudioTracks()[0];
         if (!audioTrack) return;
-
-        // Add track to all existing peers
         for (const [peerId, peer] of this.peers.entries()) {
-            await this._addTrackToPeer(peer, audioTrack);
+            await this._addTrackToPeer(peer, audioTrack, "audio");
         }
     }
 
     // ─────────────────────────────────────
-    async _addTrackToPeer(peer, audioTrack) {
+    async addVideoStream(stream) {
+        this._mergeLocalStream(stream);
+        const videoTrack = stream.getVideoTracks()[0];
+        if (!videoTrack) return;
+        for (const [peerId, peer] of this.peers.entries()) {
+            await this._addTrackToPeer(peer, videoTrack, "video");
+        }
+    }
+
+    // ─────────────────────────────────────
+    async addMediaStream(stream) {
+        await this.addAudioStream(stream);
+        await this.addVideoStream(stream);
+    }
+
+    // ─────────────────────────────────────
+    _mergeLocalStream(stream) {
+        if (!this.localStream) {
+            this.localStream = new MediaStream();
+        }
+
+        for (const track of stream.getTracks()) {
+            const existingTrack = this.localStream.getTracks().find((localTrack) => localTrack.kind === track.kind);
+            if (existingTrack) {
+                this.localStream.removeTrack(existingTrack);
+            }
+            this.localStream.addTrack(track);
+        }
+    }
+
+    // ─────────────────────────────────────
+    async _addTrackToPeer(peer, track, kind) {
         if (!peer.pc) return;
 
         const transceiver = peer.pc
             .getTransceivers()
-            .find((t) => t.receiver?.track?.kind === "audio" || t.mid === "audio");
+            .find((t) => t.receiver?.track?.kind === kind || t.sender?.track?.kind === kind || t.mid === kind);
 
         if (transceiver?.sender) {
-            await transceiver.sender.replaceTrack(audioTrack);
+            await transceiver.sender.replaceTrack(track);
             if (transceiver.currentDirection === "recvonly" || transceiver.direction === "recvonly") {
                 transceiver.direction = "sendrecv";
             } else if (transceiver.currentDirection === "inactive" || transceiver.direction === "inactive") {
                 transceiver.direction = "sendonly";
             }
         } else if (!peer.isPolite) {
-            peer.pc.addTransceiver(audioTrack, {
+            peer.pc.addTransceiver(track, {
                 direction: "sendrecv",
             });
         }
@@ -161,15 +190,16 @@ class SimpleP2P {
         const pc = new RTCPeerConnection(this.config);
 
         // Only the impolite side pre-creates offerable media.
-        // If browser is polite, wait for Pd's offer to create the audio m-line.
+        // If browser is polite, wait for Pd's offer to create media m-lines.
         if (this.localStream) {
-            const audioTrack = this.localStream.getAudioTracks()[0];
-            if (audioTrack && !peer.isPolite) {
-                const transceiver = pc.addTransceiver(audioTrack, {
-                    direction: "sendrecv",
-                });
-            } else if (audioTrack) {
-                // Polite peers answer the offer's audio m-line instead of creating one early.
+            for (const track of this.localStream.getTracks()) {
+                if (!peer.isPolite) {
+                    pc.addTransceiver(track, {
+                        direction: "sendrecv",
+                    });
+                } else {
+                    // Polite peers answer the offer's m-lines instead of creating them early.
+                }
             }
         }
 
@@ -187,7 +217,7 @@ class SimpleP2P {
 
         pc.ontrack = (event) => {
             const stream = event.streams[0] || new MediaStream([event.track]);
-            this.onTrack(peerId, stream);
+            this.onTrack(peerId, stream, event.track);
         };
 
         pc.onconnectionstatechange = () => {
@@ -257,10 +287,9 @@ class SimpleP2P {
         try {
             await pc.setRemoteDescription(new RTCSessionDescription(description));
 
-            // IMPORTANT: browser is polite/callee here.
-            // Pd's offer created the audio transceiver.
-            // Attach mic before creating the answer, otherwise Firefox/Chrome answers recvonly.
-            await this._configureAudioAnswer(pc, description);
+            // Attach local media before answering, otherwise Firefox/Chrome can answer recvonly.
+            await this._configureMediaAnswer(pc, description, "audio");
+            await this._configureMediaAnswer(pc, description, "video");
 
             await this._flushPendingCandidates(peer);
             await pc.setLocalDescription();
@@ -277,35 +306,35 @@ class SimpleP2P {
     }
 
     // ─────────────────────────────────────
-    _audioOfferDirection(description) {
+    _mediaOfferDirection(description, kind) {
         const sdp = description?.sdp || "";
-        const audio = sdp.match(/(^|\r?\n)m=audio[\s\S]*?(?=\r?\nm=|$)/);
-        if (!audio) return null;
+        const media = sdp.match(new RegExp(`(^|\\r?\\n)m=${kind}[\\s\\S]*?(?=\\r?\\nm=|$)`));
+        if (!media) return null;
 
-        const section = audio[0];
+        const section = media[0];
         const direction = section.match(/\r?\na=(sendrecv|sendonly|recvonly|inactive)(\r?\n|$)/);
         return direction ? direction[1] : "sendrecv";
     }
 
     // ─────────────────────────────────────
-    async _configureAudioAnswer(pc, offer) {
-        const offerDirection = this._audioOfferDirection(offer);
+    async _configureMediaAnswer(pc, offer, kind) {
+        const offerDirection = this._mediaOfferDirection(offer, kind);
         if (!offerDirection || offerDirection === "inactive") return;
 
-        const audioTrack = this.localStream?.getAudioTracks()[0] || null;
-        const audioTransceiver = pc
+        const track = this.localStream?.getTracks().find((localTrack) => localTrack.kind === kind) || null;
+        const transceiver = pc
             .getTransceivers()
-            .find((t) => t.receiver?.track?.kind === "audio" || t.sender?.track?.kind === "audio");
+            .find((t) => t.receiver?.track?.kind === kind || t.sender?.track?.kind === kind);
 
-        if (!audioTransceiver) return;
+        if (!transceiver) return;
 
-        if (audioTrack && (offerDirection === "sendrecv" || offerDirection === "recvonly")) {
-            await audioTransceiver.sender.replaceTrack(audioTrack);
-            audioTransceiver.direction = offerDirection === "sendrecv" ? "sendrecv" : "sendonly";
+        if (track && (offerDirection === "sendrecv" || offerDirection === "recvonly")) {
+            await transceiver.sender.replaceTrack(track);
+            transceiver.direction = offerDirection === "sendrecv" ? "sendrecv" : "sendonly";
         } else if (offerDirection === "sendrecv" || offerDirection === "sendonly") {
-            audioTransceiver.direction = "recvonly";
+            transceiver.direction = "recvonly";
         } else {
-            audioTransceiver.direction = "inactive";
+            transceiver.direction = "inactive";
         }
     }
 
