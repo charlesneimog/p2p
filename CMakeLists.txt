@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.30)
 project(p2p~ LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -36,6 +36,10 @@ find_package(Boost REQUIRED)
 # ╭──────────────────────────────────────╮
 # │             Dependências             │
 # ╰──────────────────────────────────────╯
+if(MINGW)
+    add_compile_options(-Wno-error=format -Wno-error=format-extra-args)
+endif()
+
 cpmaddpackage(
     NAME
     libdatachannel
@@ -64,6 +68,8 @@ cpmaddpackage("gh:gabime/spdlog@1.17.0")
 set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 pd_add_external(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p~.cpp")
+pd_add_datafile(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/p2p~-help.pd")
+
 target_include_directories(p2p_tilde PRIVATE "${opus_SOURCE_DIR}/include")
 target_link_libraries(
     p2p_tilde
@@ -72,11 +78,27 @@ target_link_libraries(
             spdlog
             opus)
 
-set_target_properties(opus PROPERTIES POSITION_INDEPENDENT_CODE ON)
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    # add debug symbols to the target
-    target_compile_options(p2p_tilde PRIVATE -g)
+target_compile_options(
+    p2p_tilde
+    PRIVATE $<$<CONFIG:Release>:
+            $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-O3>
+            $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-ffunction-sections>
+            $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fdata-sections>
+            $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-math-errno>
+            $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-trapping-math>
+            $<$<CXX_COMPILER_ID:MSVC>:/O2>
+            $<$<CXX_COMPILER_ID:MSVC>:/Ob3>
+            $<$<CXX_COMPILER_ID:MSVC>:/Oi>
+            $<$<CXX_COMPILER_ID:MSVC>:/Ot>
+            $<$<CXX_COMPILER_ID:MSVC>:/fp:fast>
+            $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:AppleClang,Clang,GNU>>:-msse4.2>
+            $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/arch:AVX2>
+            >)
 
+set_target_properties(opus PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(p2p_tilde PRIVATE -g)
 endif()
 
 execute_process(

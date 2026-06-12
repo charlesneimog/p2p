@@ -1,4 +1,4 @@
-#N canvas 0 0 1112 1132 10;
+#N canvas 0 0 925 1132 10;
 #X declare -path build -path .build;
 #X declare -lib xlab;
 #X msg 47 233 disconnect;
@@ -51,7 +51,7 @@
 #X obj 24 49 tgl 18 0 empty empty empty 0 -9 0 10 #fcfcfc #000000 #000000 0 1;
 #X obj 266 517 print;
 #X obj 266 421 route user_4444;
-#X obj 24 346 p2p~ -o 8 -r, f 29;
+#X obj 24 346 p2p~ -o 8 -sr, f 29;
 #X obj 266 475 p2p type message;
 #X connect 0 0 24 0;
 #X connect 1 0 2 0;

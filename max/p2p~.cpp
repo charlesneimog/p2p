@@ -88,7 +88,6 @@ struct p2p_tilde_messdata {
     enum P2P_MESS {
         LOG,
         MESSAGE,
-        PEERS,
     };
     P2P_MESS type;
     std::string msg;
@@ -108,7 +107,7 @@ struct p2p_state {
 struct p2p_tilde {
     t_object x_obj;
     t_sample x_f;
-    float peers_connected;
+    float peer_connected;
 
     bool json;
     bool wants_stream;
@@ -118,6 +117,7 @@ struct p2p_tilde {
     int max_in_channels;
     int frame_size;
 
+    t_clock *report_clock;
     t_outlet *out_signals;
     t_outlet *out_msgs;
 
@@ -148,12 +148,6 @@ static void p2p_tilde_mess(t_pd *obj, void *data) {
         SETSYMBOL(&o[0], gensym(d->user.c_str()));
         SETSYMBOL(&o[1], gensym(d->msg.c_str()));
         outlet_anything(x->out_msgs, gensym("json"), 2, o);
-        break;
-    }
-    case p2p_tilde_messdata::PEERS: {
-        t_atom o[1];
-        SETFLOAT(o, x->peers_connected);
-        outlet_anything(x->out_msgs, gensym("peers"), 1, o);
         break;
     }
     }
@@ -456,11 +450,8 @@ static void p2p_disconnect(p2p_tilde *x) {
         x->state->shared_ws->close();
     }
 
-    x->peers_connected = 0;
-    auto *d = new p2p_tilde_messdata();
-    d->type = p2p_tilde_messdata::PEERS;
-    pd_queue_mess(&pd_maininstance, &x->x_obj.te_g.g_pd, d, p2p_tilde_mess);
-
+    x->peer_connected = 0;
+    clock_delay(x->report_clock, 0);
     p2p_safelogpost(x, PD_NORMAL, "Disconnected");
 }
 
@@ -486,11 +477,8 @@ static void p2p_peer_join(p2p_tilde *x, json data) {
     node->is_streaming = x->wants_stream;
     node->making_offer = should_be_caller;
     p2p_setup_webrtc_for_node(x, node);
-    x->peers_connected = p2p_count_active_nodes(x);
-
-    auto *d = new p2p_tilde_messdata();
-    d->type = p2p_tilde_messdata::PEERS;
-    pd_queue_mess(&pd_maininstance, &x->x_obj.te_g.g_pd, d, p2p_tilde_mess);
+    x->peer_connected = p2p_count_active_nodes(x);
+    clock_delay(x->report_clock, 0);
 
     if (should_be_caller) {
         if (!node->local_offer_sent) {
@@ -589,11 +577,8 @@ static void p2p_existing_peers(p2p_tilde *x, json data) {
             p2p_safelogpost(x, PD_ERROR, "No more available nodes for %s", peer_name.c_str());
         }
     }
-    x->peers_connected = p2p_count_active_nodes(x);
-
-    auto *d = new p2p_tilde_messdata();
-    d->type = p2p_tilde_messdata::PEERS;
-    pd_queue_mess(&pd_maininstance, &x->x_obj.te_g.g_pd, d, p2p_tilde_mess);
+    x->peer_connected = p2p_count_active_nodes(x);
+    clock_delay(x->report_clock, 0);
 }
 
 // ─────────────────────────────────────
@@ -707,11 +692,8 @@ static void p2p_peerleft(p2p_tilde *x, json data) {
         node->user.clear();
         node->pending_remote_candidates.clear();
     }
-    x->peers_connected = p2p_count_active_nodes(x);
-
-    auto *d = new p2p_tilde_messdata();
-    d->type = p2p_tilde_messdata::PEERS;
-    pd_queue_mess(&pd_maininstance, &x->x_obj.te_g.g_pd, d, p2p_tilde_mess);
+    x->peer_connected = p2p_count_active_nodes(x);
+    clock_delay(x->report_clock, 0);
 }
 
 // ─────────────────────────────────────
@@ -881,7 +863,7 @@ static void p2p_json_symbol(p2p_tilde *x, t_symbol *s) {
 // ─────────────────────────────────────
 static void p2p_report(p2p_tilde *x) {
     t_atom atoms[1];
-    SETFLOAT(atoms, x->peers_connected);
+    SETFLOAT(atoms, x->peer_connected);
     outlet_anything(x->out_msgs, gensym("peers"), 1, atoms);
     canvas_update_dsp();
 }
@@ -1033,7 +1015,7 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
     }
 
     x = (p2p_tilde *)pd_new(p2p_tilde_class);
-    x->peers_connected = 0;
+    x->peer_connected = 0;
     x->multichannel = false;
     x->max_out_channels = 8;
     x->fixchannels = false;
@@ -1158,6 +1140,7 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
 
     x->out_signals = outlet_new(&x->x_obj, &s_signal);
     x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
+    x->report_clock = clock_new(&x->x_obj, (t_method)p2p_report);
     x->state->peers_channels.reserve(x->max_out_channels);
     return x;
 }
@@ -1183,6 +1166,11 @@ static void p2p_free(p2p_tilde *x) {
         }
         delete x->state;
         x->state = nullptr;
+    }
+
+    if (x->report_clock) {
+        clock_free(x->report_clock);
+        x->report_clock = nullptr;
     }
 }
 

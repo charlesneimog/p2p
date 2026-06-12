@@ -217,13 +217,21 @@
                 </header>
                 <div class="grid grid-cols-1">
                     <div>
-                        <button class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all" id="btn-init-mic">Test 1</button>
-                        <button class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all" id="btn-init-mic">Test 2</button>
-
+                        <button
+                            class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            id="audio-test1"
+                        >
+                            Test 1
+                        </button>
                     </div>
+
+                    <script>
+                        document.getElementById("audio-test1").addEventListener("click", () => {
+                            window.open("./tests/test1/", "_blank");
+                        });
+                    </script>
                 </div>
             </section>
-
 
             <section
                 class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-4 shadow-sm"
@@ -234,20 +242,27 @@
                 </header>
                 <div class="grid grid-cols-1">
                     <div>
-                        <button class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all" id="btn-init-mic">Test 1</button>
-                        <button class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all" id="btn-init-mic">Test 2</button>
-
+                        <button
+                            class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            id="video-test1"
+                        >
+                            Test 1
+                        </button>
+                        <script>
+                            document.getElementById("video-test1").addEventListener("click", () => {
+                                window.open("./tests/test1/", "_blank");
+                            });
+                        </script>
                     </div>
-                        
-                    </button>
-                        <span class="font-label-sm text-label-sm text-secondary">Local</span>
-                        <video
-                            autoplay
-                            class="w-full aspect-video bg-inverse-surface rounded-lg border border-outline-variant object-cover"
-                            id="local-video"
-                            muted
-                            playsinline
-                        ></video>
+
+                    <span class="font-label-sm text-label-sm text-secondary">Local</span>
+                    <video
+                        autoplay
+                        class="w-full aspect-video bg-inverse-surface rounded-lg border border-outline-variant object-cover"
+                        id="local-video"
+                        muted
+                        playsinline
+                    ></video>
                 </div>
             </section>
 
@@ -491,7 +506,7 @@
                         videoElement.srcObject = null;
                         videoElement.remove();
                     }
-                   // renderEmptyVideoState();
+                    // renderEmptyVideoState();
                     addLog("Peer disconnected from room.", "info");
                     renderPeers();
                 };
