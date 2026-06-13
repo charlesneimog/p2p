@@ -1,0 +1,212 @@
+:root {
+    color-scheme: light;
+    font-family:
+        Inter,
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    background: #f7f7f4;
+    color: #171717;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    background: #f7f7f4;
+}
+
+main {
+    width: min(920px, 100%);
+    min-height: 100vh;
+    margin: 0 auto;
+    display: grid;
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    gap: 16px;
+    padding: 16px;
+}
+
+header,
+.controls,
+.status,
+.panel,
+.log {
+    border: 1px solid #d7d7d2;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+header {
+    padding: 18px 20px;
+}
+
+h1,
+h2 {
+    margin: 0;
+    line-height: 1.15;
+}
+
+h1 {
+    font-size: 24px;
+}
+
+h2 {
+    font-size: 18px;
+}
+
+.controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto;
+    gap: 12px;
+    align-items: end;
+    padding: 16px;
+}
+
+label {
+    display: grid;
+    gap: 6px;
+    color: #5a5a55;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+input {
+    width: 100%;
+    border: 1px solid #c8c8c2;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font: inherit;
+    color: #171717;
+    background: #fbfbf8;
+}
+
+button {
+    min-height: 42px;
+    border: 1px solid #171717;
+    border-radius: 6px;
+    padding: 0 16px;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+button.primary {
+    color: #ffffff;
+    background: #171717;
+}
+
+button.secondary {
+    color: #171717;
+    background: #ffffff;
+}
+
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.status {
+    padding: 12px 16px;
+    color: #4d4d48;
+    font-weight: 700;
+}
+
+.status.connected {
+    border-color: #2f7d4d;
+    color: #185d32;
+    background: #eaf6ee;
+}
+
+.status.error {
+    border-color: #b3261e;
+    color: #8c1d18;
+    background: #ffedea;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px;
+}
+
+.panel {
+    min-height: 190px;
+    display: grid;
+    gap: 14px;
+    align-content: start;
+    padding: 16px;
+}
+
+.meter {
+    height: 18px;
+    overflow: hidden;
+    border: 1px solid #c8c8c2;
+    border-radius: 6px;
+    background: #eeeeea;
+}
+
+.meter span {
+    width: 0%;
+    height: 100%;
+    display: block;
+    background: #171717;
+    transition: width 80ms linear;
+}
+
+.muted {
+    color: #6d6d67;
+}
+
+.remote-list {
+    display: grid;
+    gap: 10px;
+}
+
+.remote-peer {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid #d7d7d2;
+    border-radius: 6px;
+    background: #fbfbf8;
+}
+
+.messages {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+}
+
+.log {
+    min-height: 180px;
+    max-height: 260px;
+    overflow: auto;
+    padding: 12px;
+    color: #f0f0ea;
+    background: #20201e;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+}
+
+.log div + div {
+    margin-top: 6px;
+}
+
+@media (max-width: 720px) {
+    main {
+        padding: 12px;
+    }
+
+    .controls,
+    .grid,
+    .messages {
+        grid-template-columns: 1fr;
+    }
+}

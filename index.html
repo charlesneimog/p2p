@@ -143,6 +143,9 @@
                         Access this URL on a secondary device (smartphone or desktop) to establish a signaling channel
                         and test the peer-to-peer connection.
                     </p>
+                    <p class="font-body-md text-body-md text-secondary max-w-prose">
+                        This, by default, will just send audio/video to the other peer, but you can also test data messaging and other scenarios using the buttons below.
+                    </p>
                 </header>
                 <div class="flex flex-col sm:flex-row gap-4">
                     <div class="flex-1 flex flex-col gap-2">
@@ -215,19 +218,45 @@
                     <h2 class="font-headline-md text-headline-md text-on-background">Audio</h2>
                     <span class="material-symbols-outlined text-on-surface-variant">mic</span>
                 </header>
-                <div class="grid grid-cols-1">
+                <p class="font-body-md text-body-md text-secondary w-full text-center" id="audio-placeholder">
+                        Select one of the following test scenarios to validate audio streaming functionality across peers. Each test will open a new window simulating the respective conditions for sending and receiving audio streams.
+                    </p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+
                     <div>
                         <button
-                            class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
                             id="audio-test1"
                         >
-                            Test 1
+                            Send
+                        </button>
+                    </div>
+                    <div>
+                        <button
+                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            id="audio-test2"
+                        >
+                            Receive
+                        </button>
+                    </div>
+                    <div>
+                        <button
+                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            id="audio-test3"
+                        >
+                            Send/Receive
                         </button>
                     </div>
 
                     <script>
                         document.getElementById("audio-test1").addEventListener("click", () => {
-                            window.open("./tests/test1/", "_blank");
+                            window.open("./tests/send-audio/", "_blank");
+                        });
+                        document.getElementById("audio-test2").addEventListener("click", () => {
+                            window.open("./tests/receive-audio/", "_blank");
+                        });
+                        document.getElementById("audio-test3").addEventListener("click", () => {
+                            window.open("./tests/send-receive-audio/", "_blank");
                         });
                     </script>
                 </div>
@@ -240,30 +269,51 @@
                     <h2 class="font-headline-md text-headline-md text-on-background">Video</h2>
                     <span class="material-symbols-outlined text-on-surface-variant">videocam</span>
                 </header>
-                <div class="grid grid-cols-1">
+                <p class="font-body-md text-body-md text-secondary w-full text-center" id="video-placeholder">
+                    Select one of the following test scenarios to validate video streaming functionality across peers.
+                    Each test will open a new window simulating the respective conditions for sending and receiving video
+                    streams.
+                </p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                         <button
-                            class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
                             id="video-test1"
                         >
-                            Test 1
+                            Send
                         </button>
-                        <script>
-                            document.getElementById("video-test1").addEventListener("click", () => {
-                                window.open("./tests/test1/", "_blank");
-                            });
-                        </script>
+                    </div>
+                    <div>
+                        <button
+                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            id="video-test2"
+                        >
+                            Receive
+                        </button>
+                    </div>
+                    <div>
+                        <button
+                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            id="video-test3"
+                        >
+                            Send/Receive
+                        </button>
                     </div>
 
-                    <span class="font-label-sm text-label-sm text-secondary">Local</span>
-                    <video
-                        autoplay
-                        class="w-full aspect-video bg-inverse-surface rounded-lg border border-outline-variant object-cover"
-                        id="local-video"
-                        muted
-                        playsinline
-                    ></video>
+                    <script>
+                        document.getElementById("video-test1").addEventListener("click", () => {
+                            window.open("./tests/send-video/", "_blank");
+                        });
+                        document.getElementById("video-test2").addEventListener("click", () => {
+                            window.open("./tests/receive-video/", "_blank");
+                        });
+                        document.getElementById("video-test3").addEventListener("click", () => {
+                            window.open("./tests/send-receive-video/", "_blank");
+                        });
+                    </script>
                 </div>
+                <video id="local-video" autoplay muted playsinline hidden></video>
+                <div id="remote-videos" hidden></div>
             </section>
 
             <section
@@ -308,7 +358,7 @@
             const logDiv = document.getElementById("console-log");
             const sendMsgBtn = document.getElementById("btn-test-msg");
             const localVideo = document.getElementById("local-video");
-            //const remoteVideos = document.getElementById("remote-videos");
+            const remoteVideos = document.getElementById("remote-videos");
             //const initAudioBtn = document.getElementById("btn-init-mic");
 
             let network = null;

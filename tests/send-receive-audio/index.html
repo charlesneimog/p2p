@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>P2P Send and Receive Audio Test</title>
+        <link rel="stylesheet" href="../audio-test.css" />
+    </head>
+    <body data-audio-mode="sendrecv" data-audio-label="Send and Receive Audio Test">
+        <main>
+            <header>
+                <h1>Send and Receive Audio</h1>
+            </header>
+
+            <section class="controls" aria-label="Connection controls">
+                <label>
+                    Room name
+                    <input id="room-name" type="text" value="node-alpha" />
+                </label>
+                <label>
+                    User name
+                    <input id="user-name" type="text" />
+                </label>
+                <button class="primary" id="btn-connect" type="button">Connect</button>
+                <button class="secondary" id="btn-disconnect" type="button" disabled>Disconnect</button>
+            </section>
+
+            <div class="status" id="status">Disconnected</div>
+
+            <section class="grid" aria-label="Audio panels">
+                <article class="panel" id="local-panel">
+                    <h2>Local Audio</h2>
+                    <p class="muted" id="local-state"></p>
+                    <div class="meter"><span id="local-meter"></span></div>
+                </article>
+                <article class="panel" id="remote-panel">
+                    <h2>Remote Audio</h2>
+                    <p class="muted" id="remote-state"></p>
+                    <div class="remote-list" id="remote-list"></div>
+                </article>
+            </section>
+
+            <section class="panel" aria-label="Messages">
+                <h2>Messages</h2>
+                <div class="messages">
+                    <input id="message-text" type="text" placeholder="Write a test message" />
+                    <button class="secondary" id="btn-send-message" type="button" disabled>Send</button>
+                </div>
+                <div class="log" id="log" aria-label="Connection log"></div>
+            </section>
+        </main>
+        <script src="../../p2p.js"></script>
+        <script src="../audio-test.js"></script>
+    </body>
+</html>

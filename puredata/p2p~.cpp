@@ -9,9 +9,11 @@
 #include <thread>
 #include <chrono>
 #include <map>
+#include <mutex>
 #include <random>
 #include <cstdarg>
 #include <cstdio>
+#include <variant>
 
 #include <nlohmann/json.hpp>
 #include <rtc/rtc.hpp>
@@ -44,6 +46,7 @@ struct P2PNode {
     bool answering_offer{false};
     bool local_offer_sent{false};
     bool polite_media_offer_sent{false};
+    bool stun_warning_reported{false};
 
     std::shared_ptr<rtc::WebSocket> ws;
     std::shared_ptr<rtc::PeerConnection> pc;
@@ -57,16 +60,13 @@ struct P2PNode {
     std::shared_ptr<rtc::RtpPacketizationConfig> rtp_config;
 
     // Audio codec
-    OpusEncoder *opus_enc = nullptr;
-    OpusDecoder *opus_dec = nullptr;
-    int sample_rate = 48000;
-    int frame_size = 480;
+    OpusDecoder *opus_dec_mono = nullptr;
+    std::mutex opus_dec_mono_mutex;
 
     // Threading
     std::thread tx_thread;
     std::atomic<bool> thread_running{true};
     int channel_index = -1;
-
     std::vector<std::function<void()>> pending_negotiations;
 
     ~P2PNode() {
@@ -74,11 +74,10 @@ struct P2PNode {
         if (tx_thread.joinable()) {
             tx_thread.join();
         }
-        if (opus_enc) {
-            opus_encoder_destroy(opus_enc);
-        }
-        if (opus_dec) {
-            opus_decoder_destroy(opus_dec);
+        std::lock_guard<std::mutex> lock(opus_dec_mono_mutex);
+        if (opus_dec_mono) {
+            opus_decoder_destroy(opus_dec_mono);
+            opus_dec_mono = nullptr;
         }
     }
 };
@@ -118,7 +117,8 @@ struct p2p_tilde {
     int max_in_channels;
     int frame_size;
 
-    t_outlet *out_signals;
+    t_outlet **out_signals;
+    int out_signals_count;
     t_outlet *out_msgs;
 
     // json
@@ -131,7 +131,24 @@ struct p2p_tilde {
     t_symbol *username;
     t_symbol *room;
     char *jsonkey;
+
+    OpusEncoder *opus_enc_mono = nullptr;
+    OpusEncoder *opus_enc_stereo = nullptr;
+    std::mutex *opus_enc_mono_mutex = nullptr;
+    std::mutex *opus_enc_stereo_mutex = nullptr;
 };
+
+// ─────────────────────────────────────
+static void p2p_init_lifetime_fields(p2p_tilde *x) {
+    x->state = nullptr;
+    x->out_signals = nullptr;
+    x->out_signals_count = 0;
+    x->out_msgs = nullptr;
+    x->opus_enc_mono = nullptr;
+    x->opus_enc_stereo = nullptr;
+    x->opus_enc_mono_mutex = nullptr;
+    x->opus_enc_stereo_mutex = nullptr;
+}
 
 // ─────────────────────────────────────
 static void p2p_tilde_mess(t_pd *obj, void *data) {
@@ -160,6 +177,92 @@ static void p2p_tilde_mess(t_pd *obj, void *data) {
 
     delete d;
     return;
+}
+
+// ─────────────────────────────────────
+inline void p2p_safelogpost(p2p_tilde *x, t_loglevel level, const char *fmt, ...) {
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    auto *d = new p2p_tilde_messdata();
+    d->type = p2p_tilde_messdata::LOG;
+    d->level = level;
+    d->msg = buf;
+
+    pd_queue_mess(&pd_maininstance, &x->x_obj.te_g.g_pd, d, p2p_tilde_mess);
+}
+
+// ─────────────────────────────────────
+static int p2p_create_encoder(p2p_tilde *x, OpusEncoder **enc, int channels) {
+    int err;
+    *enc = opus_encoder_create(sys_getsr(), channels, OPUS_APPLICATION_AUDIO, &err);
+    if (err != OPUS_OK) {
+        p2p_safelogpost(x, PD_ERROR, "Opus %d-channel encoder error: %d", channels, err);
+        return -1;
+    }
+
+    opus_encoder_ctl(*enc, OPUS_SET_APPLICATION(OPUS_APPLICATION_AUDIO));
+    opus_encoder_ctl(*enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
+    opus_encoder_ctl(*enc, OPUS_SET_BITRATE(OPUS_BITRATE_MAX));
+    opus_encoder_ctl(*enc, OPUS_SET_VBR(1));
+    opus_encoder_ctl(*enc, OPUS_SET_VBR_CONSTRAINT(1));
+    opus_encoder_ctl(*enc, OPUS_SET_COMPLEXITY(10));
+    opus_encoder_ctl(*enc, OPUS_SET_INBAND_FEC(0));
+    opus_encoder_ctl(*enc, OPUS_SET_DTX(0));
+    return 0;
+}
+
+// ─────────────────────────────────────
+static void p2p_destroy_node_decoder(P2PNode *node) {
+    std::lock_guard<std::mutex> lock(node->opus_dec_mono_mutex);
+    if (node->opus_dec_mono) {
+        opus_decoder_destroy(node->opus_dec_mono);
+        node->opus_dec_mono = nullptr;
+    }
+}
+
+// ─────────────────────────────────────
+static int p2p_create_node_decoder(p2p_tilde *x, P2PNode *node) {
+    p2p_destroy_node_decoder(node);
+    std::lock_guard<std::mutex> lock(node->opus_dec_mono_mutex);
+    int err;
+    node->opus_dec_mono = opus_decoder_create(sys_getsr(), 1, &err);
+    if (err != OPUS_OK) {
+        node->opus_dec_mono = nullptr;
+        p2p_safelogpost(x, PD_ERROR, "Opus decoder error for peer '%s': %d", node->user.c_str(),
+                        err);
+        return -1;
+    }
+    return 0;
+}
+
+// ─────────────────────────────────────
+static void p2p_destroy_codecs(p2p_tilde *x) {
+    if (x->opus_enc_mono) {
+        opus_encoder_destroy(x->opus_enc_mono);
+        x->opus_enc_mono = nullptr;
+    }
+    if (x->opus_enc_stereo) {
+        opus_encoder_destroy(x->opus_enc_stereo);
+        x->opus_enc_stereo = nullptr;
+    }
+}
+
+// ─────────────────────────────────────
+static void p2p_create_codec_locks(p2p_tilde *x) {
+    x->opus_enc_mono_mutex = new std::mutex();
+    x->opus_enc_stereo_mutex = new std::mutex();
+}
+
+// ─────────────────────────────────────
+static void p2p_destroy_codec_locks(p2p_tilde *x) {
+    delete x->opus_enc_mono_mutex;
+    delete x->opus_enc_stereo_mutex;
+    x->opus_enc_mono_mutex = nullptr;
+    x->opus_enc_stereo_mutex = nullptr;
 }
 
 // ─────────────────────────────────────
@@ -194,19 +297,44 @@ static int p2p_count_active_nodes(p2p_tilde *x) {
 }
 
 // ─────────────────────────────────────
-inline void p2p_safelogpost(p2p_tilde *x, t_loglevel level, const char *fmt, ...) {
-    char buf[1024];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
+static const char *p2p_candidate_type_name(rtc::Candidate::Type type) {
+    switch (type) {
+    case rtc::Candidate::Type::Host:
+        return "host";
+    case rtc::Candidate::Type::ServerReflexive:
+        return "srflx";
+    case rtc::Candidate::Type::PeerReflexive:
+        return "prflx";
+    case rtc::Candidate::Type::Relayed:
+        return "relay";
+    case rtc::Candidate::Type::Unknown:
+    default:
+        return "unknown";
+    }
+}
 
-    auto *d = new p2p_tilde_messdata();
-    d->type = p2p_tilde_messdata::LOG;
-    d->level = level;
-    d->msg = buf;
+// ─────────────────────────────────────
+static void p2p_warn_if_not_stun_pair(p2p_tilde *x, P2PNode *node) {
+    if (node->stun_warning_reported || !node->pc) {
+        return;
+    }
 
-    pd_queue_mess(&pd_maininstance, &x->x_obj.te_g.g_pd, d, p2p_tilde_mess);
+    rtc::Candidate local;
+    rtc::Candidate remote;
+    if (!node->pc->getSelectedCandidatePair(&local, &remote)) {
+        return;
+    }
+
+    node->stun_warning_reported = true;
+    const bool uses_stun = local.type() == rtc::Candidate::Type::ServerReflexive ||
+                           remote.type() == rtc::Candidate::Type::ServerReflexive;
+    if (!uses_stun) {
+        p2p_safelogpost(x, PD_ERROR,
+                        "Warning: selected ICE pair for peer '%s' is not STUN/srflx "
+                        "(local=%s, remote=%s)",
+                        node->user.c_str(), p2p_candidate_type_name(local.type()),
+                        p2p_candidate_type_name(remote.type()));
+    }
 }
 
 // ─────────────────────────────────────
@@ -219,12 +347,51 @@ void p2p_request_stream_change(P2PNode *node, std::function<void()> action) {
 }
 
 // ─────────────────────────────────────
-static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
+static void p2p_disable_video_media(rtc::Description &description) {
+    for (int i = 0; i < description.mediaCount(); ++i) {
+        auto media = description.media(i);
+        if (!std::holds_alternative<rtc::Description::Media *>(media)) {
+            continue;
+        }
+
+        auto *remote_media = std::get<rtc::Description::Media *>(media);
+        if (remote_media && remote_media->type() == "video") {
+            remote_media->setDirection(rtc::Description::Direction::Inactive);
+            remote_media->markRemoved();
+        }
+    }
+}
+
+// ─────────────────────────────────────
+static bool p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
     rtc::Configuration config;
     config.iceServers.emplace_back("stun:stun.l.google.com:19302");
     node->pc = std::make_shared<rtc::PeerConnection>(config);
+    if (p2p_create_node_decoder(x, node) != 0) {
+        node->pc->close();
+        node->pc.reset();
+        return false;
+    }
     node->remote_description_set = false;
+    node->stun_warning_reported = false;
     p2p_safelogpost(x, PD_DEBUG, "Pd is polite=%d", node->is_polite);
+    node->pc->onIceStateChange([x, node](rtc::PeerConnection::IceState state) {
+        if (state == rtc::PeerConnection::IceState::Connected ||
+            state == rtc::PeerConnection::IceState::Completed) {
+            p2p_warn_if_not_stun_pair(x, node);
+        }
+    });
+    node->pc->onLocalCandidate([x, node](rtc::Candidate candidate) {
+        if (!node->ws || node->remote_peer_id.empty()) {
+            return;
+        }
+
+        json msg = {
+            {"type", "ice-candidate"},
+            {"to", node->remote_peer_id},
+            {"candidate", {{"candidate", std::string(candidate)}, {"sdpMid", candidate.mid()}}}};
+        node->ws->send(msg.dump());
+    });
     node->pc->onLocalDescription([x, node](rtc::Description description) {
         const std::string type = description.typeString();
         p2p_safelogpost(x, PD_DEBUG, "onLocalDescription %s", type.c_str());
@@ -257,9 +424,9 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
         }
     });
 
-    auto install_sendrecv_handler = [node](std::shared_ptr<rtc::Track> track) {
+    auto install_sendrecv_handler = [x, node](std::shared_ptr<rtc::Track> track) {
         node->rtp_config = std::make_shared<rtc::RtpPacketizationConfig>(node->audio_ssrc, "audio",
-                                                                         109, node->sample_rate);
+                                                                         109, sys_getsr());
         auto handler = std::make_shared<rtc::OpusRtpPacketizer>(node->rtp_config);
         handler->addToChain(std::make_shared<rtc::OpusRtpDepacketizer>());
         handler->addToChain(std::make_shared<rtc::RtcpReceivingSession>());
@@ -276,17 +443,20 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
         node->audio_track = node->pc->addTrack(audio);
         install_sendrecv_handler(node->audio_track);
         node->audio_track->onFrame([x, node](rtc::binary data, rtc::FrameInfo info) {
-            if (!node->opus_dec) {
-                p2p_safelogpost(x, PD_ERROR, "Opus decode not initialized");
-                return;
-            }
-
             constexpr int MAX_SAMPLES = 5760;
             float pcm[MAX_SAMPLES];
 
-            int samples = opus_decode_float(
-                node->opus_dec, reinterpret_cast<const unsigned char *>(data.data()),
-                static_cast<opus_int32>(data.size()), pcm, MAX_SAMPLES, 0);
+            int samples;
+            {
+                std::lock_guard<std::mutex> lock(node->opus_dec_mono_mutex);
+                if (!node->opus_dec_mono) {
+                    p2p_safelogpost(x, PD_ERROR, "Opus decode not initialized");
+                    return;
+                }
+                samples = opus_decode_float(
+                    node->opus_dec_mono, reinterpret_cast<const unsigned char *>(data.data()),
+                    static_cast<opus_int32>(data.size()), pcm, MAX_SAMPLES, 0);
+            }
 
             if (samples > 0) {
                 for (int i = 0; i < samples; i++) {
@@ -303,47 +473,56 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
     }
 
     node->pc->onTrack([x, node, install_sendrecv_handler](std::shared_ptr<rtc::Track> track) {
-        p2p_safelogpost(x, PD_NORMAL, "Remote audio track active for peer %s",
-                        node->remote_peer_id.c_str());
+        auto desc = track->description();
+        if (desc.type() == "video") {
+            p2p_safelogpost(x, PD_NORMAL, "Video track rejected; video is not implemented yet");
+            track->close();
+            return;
+        } else if (desc.type() == "audio") {
+            track->onOpen([x, node]() {
+                p2p_safelogpost(x, PD_NORMAL, "Remote audio track active for peer %s",
+                                node->remote_peer_id.c_str());
+            });
 
-        if (node->is_polite) {
-            auto desc = track->description();
-            desc.addSSRC(node->audio_ssrc, "audio");
-            track->setDescription(desc);
-
-            install_sendrecv_handler(track);
-
-        } else {
-            auto handler = std::make_shared<rtc::OpusRtpDepacketizer>();
-            handler->addToChain(std::make_shared<rtc::RtcpReceivingSession>());
-            track->setMediaHandler(handler);
-        }
-
-        track->onFrame([x, node](rtc::binary data, rtc::FrameInfo info) {
-            if (!node->opus_dec) {
-                p2p_safelogpost(x, PD_ERROR, "Opus decode not initialized");
-                return;
+            if (node->is_polite) {
+                desc.addSSRC(node->audio_ssrc, "audio");
+                track->setDescription(desc);
+                install_sendrecv_handler(track);
+            } else {
+                auto handler = std::make_shared<rtc::OpusRtpDepacketizer>();
+                handler->addToChain(std::make_shared<rtc::RtcpReceivingSession>());
+                track->setMediaHandler(handler);
             }
 
-            constexpr int MAX_SAMPLES = 5760;
-            float pcm[MAX_SAMPLES];
+            track->onFrame([x, node](rtc::binary data, rtc::FrameInfo info) {
+                constexpr int MAX_SAMPLES = 5760;
+                float pcm[MAX_SAMPLES];
 
-            int samples = opus_decode_float(
-                node->opus_dec, reinterpret_cast<const unsigned char *>(data.data()),
-                static_cast<opus_int32>(data.size()), pcm, MAX_SAMPLES, 0);
-
-            if (samples > 0) {
-                for (int i = 0; i < samples; i++) {
-                    node->receive_buffer.push(pcm[i]);
+                int samples;
+                {
+                    std::lock_guard<std::mutex> lock(node->opus_dec_mono_mutex);
+                    if (!node->opus_dec_mono) {
+                        p2p_safelogpost(x, PD_ERROR, "Opus decode not initialized");
+                        return;
+                    }
+                    samples = opus_decode_float(
+                        node->opus_dec_mono, reinterpret_cast<const unsigned char *>(data.data()),
+                        static_cast<opus_int32>(data.size()), pcm, MAX_SAMPLES, 0);
                 }
-            }
 
-            if (samples < 0) {
-                p2p_safelogpost(x, PD_ERROR, "Opus decode failed: %d, bytes=%zu", samples,
-                                data.size());
-                return;
-            }
-        });
+                if (samples > 0) {
+                    for (int i = 0; i < samples; i++) {
+                        node->receive_buffer.push(pcm[i]);
+                    }
+                }
+
+                if (samples < 0) {
+                    p2p_safelogpost(x, PD_ERROR, "Opus decode failed: %d, bytes=%zu", samples,
+                                    data.size());
+                    return;
+                }
+            });
+        }
     });
 
     if (!node->is_polite) {
@@ -397,6 +576,8 @@ static void p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
             });
         });
     }
+
+    return true;
 }
 
 // ─────────────────────────────────────
@@ -415,6 +596,35 @@ static void p2p_flush_pending_candidates(p2p_tilde *x, P2PNode *node) {
 }
 
 // ─────────────────────────────────────
+static void p2p_reset_node_connection(P2PNode *node) {
+    node->is_streaming = false;
+    node->remote_description_set = false;
+    node->making_offer = false;
+    node->ignore_offer = false;
+    node->answering_offer = false;
+    node->local_offer_sent = false;
+    node->polite_media_offer_sent = false;
+    node->stun_warning_reported = false;
+    if (node->dc) {
+        node->dc->close();
+        node->dc.reset();
+    }
+    if (node->audio_track) {
+        node->audio_track->close();
+        node->audio_track.reset();
+    }
+    if (node->pc) {
+        node->pc->close();
+        node->pc.reset();
+    }
+    p2p_destroy_node_decoder(node);
+    node->rtp_config.reset();
+    node->remote_peer_id.clear();
+    node->user.clear();
+    node->pending_remote_candidates.clear();
+}
+
+// ─────────────────────────────────────
 static void p2p_stream(p2p_tilde *x, t_float f) {
     if (f != x->wants_stream) {
         p2p_safelogpost(x, PD_NORMAL, "Stream %s", f ? "active" : "paused");
@@ -428,28 +638,7 @@ static void p2p_stream(p2p_tilde *x, t_float f) {
 // ─────────────────────────────────────
 static void p2p_disconnect(p2p_tilde *x) {
     for (auto &node : x->state->nodes) {
-        node->is_streaming = false;
-        node->remote_description_set = false;
-        node->making_offer = false;
-        node->ignore_offer = false;
-        node->answering_offer = false;
-        node->local_offer_sent = false;
-        node->polite_media_offer_sent = false;
-        if (node->dc) {
-            node->dc->close();
-            node->dc.reset();
-        }
-        if (node->audio_track) {
-            node->audio_track->close();
-            node->audio_track.reset();
-        }
-        if (node->pc) {
-            node->pc->close();
-            node->pc.reset();
-        }
-        node->remote_peer_id.clear();
-        node->user.clear();
-        node->pending_remote_candidates.clear();
+        p2p_reset_node_connection(node.get());
     }
 
     if (x->state->shared_ws) {
@@ -485,7 +674,10 @@ static void p2p_peer_join(p2p_tilde *x, json data) {
     node->is_polite = !should_be_caller;
     node->is_streaming = x->wants_stream;
     node->making_offer = should_be_caller;
-    p2p_setup_webrtc_for_node(x, node);
+    if (!p2p_setup_webrtc_for_node(x, node)) {
+        p2p_reset_node_connection(node);
+        return;
+    }
     x->peers_connected = p2p_count_active_nodes(x);
 
     auto *d = new p2p_tilde_messdata();
@@ -520,7 +712,10 @@ static void p2p_offer(p2p_tilde *x, json data) {
         bool should_be_caller = (x->state->local_peer_id < from_peer);
         node->is_polite = !should_be_caller;
         node->making_offer = should_be_caller;
-        p2p_setup_webrtc_for_node(x, node);
+        if (!p2p_setup_webrtc_for_node(x, node)) {
+            p2p_reset_node_connection(node);
+            return;
+        }
     }
 
     // ─── GLARE FIX: Collision Resolution ───
@@ -545,6 +740,7 @@ static void p2p_offer(p2p_tilde *x, json data) {
 
     try {
         rtc::Description desc(sdp_str, "offer");
+        p2p_disable_video_media(desc);
         node->pc->setRemoteDescription(std::move(desc));
         node->remote_description_set = true;
         p2p_flush_pending_candidates(x, node);
@@ -573,7 +769,10 @@ static void p2p_existing_peers(p2p_tilde *x, json data) {
             bool should_be_caller = (x->state->local_peer_id < peer_id);
             node->is_polite = !should_be_caller;
             node->making_offer = should_be_caller;
-            p2p_setup_webrtc_for_node(x, node);
+            if (!p2p_setup_webrtc_for_node(x, node)) {
+                p2p_reset_node_connection(node);
+                continue;
+            }
             if (should_be_caller && !node->local_offer_sent) {
                 node->pc->setLocalDescription();
                 p2p_safelogpost(x, PD_NORMAL, "Connecting to existing peer '%s' (%s)",
@@ -684,28 +883,7 @@ static void p2p_peerleft(p2p_tilde *x, json data) {
     P2PNode *node = p2p_find_node_by_peer(x, from_peer);
     if (node) {
         p2p_safelogpost(x, PD_NORMAL, "Peer '%s' left", node->user.c_str());
-        node->is_streaming = false;
-        node->remote_description_set = false;
-        node->making_offer = false;
-        node->ignore_offer = false;
-        node->answering_offer = false;
-        node->local_offer_sent = false;
-        node->polite_media_offer_sent = false;
-        if (node->dc) {
-            node->dc->close();
-            node->dc.reset();
-        }
-        if (node->audio_track) {
-            node->audio_track->close();
-            node->audio_track.reset();
-        }
-        if (node->pc) {
-            node->pc->close();
-            node->pc.reset();
-        }
-        node->remote_peer_id.clear();
-        node->user.clear();
-        node->pending_remote_candidates.clear();
+        p2p_reset_node_connection(node);
     }
     x->peers_connected = p2p_count_active_nodes(x);
 
@@ -890,30 +1068,28 @@ static void p2p_report(p2p_tilde *x) {
 static t_int *p2p_perform(t_int *w) {
     auto *x = (p2p_tilde *)w[1];
     auto *in = (t_sample *)w[2];
-    auto *out = (t_sample *)w[3];
-    int n = (int)w[4];
-    int num_chans = (int)w[5];
+    int n = (int)w[3];
+    int num_outputs = (int)w[4];
+    auto **outs = reinterpret_cast<t_sample **>(&w[5]);
 
     if (!x->wants_stream) {
-        // Clear all output channels first
-        for (int ch = 0; ch < num_chans; ch++) {
-            memset(out + ch * n, 0, n * sizeof(t_sample));
+        for (int ch = 0; ch < num_outputs; ch++) {
+            memset(outs[ch], 0, n * sizeof(t_sample));
         }
-        return (w + 6);
+        return (w + 5 + num_outputs);
+    }
+
+    for (auto &node : x->state->nodes) {
+        if (node->is_streaming && !node->remote_peer_id.empty() && node->pc) {
+            for (int i = 0; i < n; ++i) {
+                node->send_buffer.push(in[i]);
+            }
+        }
     }
 
     if (x->multichannel) {
-        for (auto &node : x->state->nodes) {
-            if (node->is_streaming && !node->remote_peer_id.empty() && node->pc) {
-                for (int i = 0; i < n; ++i) {
-                    node->send_buffer.push(in[i]);
-                }
-            }
-        }
-
-        // Clear all output channels first
-        for (int ch = 0; ch < num_chans; ch++) {
-            memset(out + ch * n, 0, n * sizeof(t_sample));
+        for (int ch = 0; ch < num_outputs; ch++) {
+            memset(outs[ch], 0, n * sizeof(t_sample));
         }
 
         if (x->fixchannels) {
@@ -929,10 +1105,10 @@ static t_int *p2p_perform(t_int *w) {
                     continue;
                 }
                 int ch = it->second;
-                if (ch < 0 || ch >= num_chans) {
+                if (ch < 0 || ch >= num_outputs) {
                     continue;
                 }
-                t_sample *out_ch = out + ch * n;
+                t_sample *out_ch = outs[ch];
                 for (int i = 0; i < n; ++i) {
                     float s = 0.f;
                     node->receive_buffer.pop(s);
@@ -945,10 +1121,10 @@ static t_int *p2p_perform(t_int *w) {
                 if (node->remote_peer_id.empty() || !node->pc) {
                     continue;
                 }
-                if (ch >= num_chans) {
+                if (ch >= num_outputs) {
                     break;
                 }
-                t_sample *out_ch = out + ch * n;
+                t_sample *out_ch = outs[ch];
                 for (int i = 0; i < n; ++i) {
                     float s = 0.f;
                     node->receive_buffer.pop(s);
@@ -959,13 +1135,6 @@ static t_int *p2p_perform(t_int *w) {
         }
 
     } else {
-        for (auto &node : x->state->nodes) {
-            if (node->is_streaming && !node->remote_peer_id.empty() && node->pc) {
-                for (int i = 0; i < n; ++i) {
-                    node->send_buffer.push(in[i]);
-                }
-            }
-        }
         for (int i = 0; i < n; ++i) {
             float mixed = 0.f;
             for (auto &node : x->state->nodes) {
@@ -973,11 +1142,11 @@ static t_int *p2p_perform(t_int *w) {
                 node->receive_buffer.pop(s);
                 mixed += s;
             }
-            out[i] = mixed;
+            outs[0][i] = mixed;
         }
     }
 
-    return (w + 6);
+    return (w + 5 + num_outputs);
 }
 
 // ─────────────────────────────────────
@@ -986,15 +1155,16 @@ static void p2p_dsp(p2p_tilde *x, t_signal **sp) {
         return;
     }
 
-    int num_active = p2p_count_active_nodes(x);
-    int num_outputs;
-    if (x->multichannel) {
-        num_outputs = x->fixchannels ? x->max_out_channels : (num_active > 0 ? num_active : 1);
-    } else {
-        num_outputs = 1;
+    int num_outputs = x->out_signals_count > 0 ? x->out_signals_count : 1;
+    std::vector<t_int> args(4 + num_outputs);
+    args[0] = reinterpret_cast<t_int>(x);
+    args[1] = reinterpret_cast<t_int>(sp[0]->s_vec);
+    args[2] = static_cast<t_int>(sp[0]->s_n);
+    args[3] = static_cast<t_int>(num_outputs);
+    for (int i = 0; i < num_outputs; i++) {
+        args[4 + i] = reinterpret_cast<t_int>(sp[i + 1]->s_vec);
     }
-    signal_setmultiout(&sp[1], num_outputs);
-    dsp_add(p2p_perform, 5, x, sp[0]->s_vec, sp[1]->s_vec, sp[0]->s_n, num_outputs);
+    dsp_addv(p2p_perform, static_cast<int>(args.size()), args.data());
 }
 
 // ─────────────────────────────────────
@@ -1003,6 +1173,7 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
 
     if (strcmp(s->s_name, "p2p") == 0) {
         x = (p2p_tilde *)pd_new(p2p_class);
+        p2p_init_lifetime_fields(x);
         x->json_keys_count = argc;
         x->out_json_keys = (t_outlet **)getbytes(argc * sizeof(*x->out_json_keys));
         x->json_keys = (char **)getbytes(argc * sizeof(*x->json_keys));
@@ -1033,9 +1204,12 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
     }
 
     x = (p2p_tilde *)pd_new(p2p_tilde_class);
+    p2p_init_lifetime_fields(x);
+    p2p_create_codec_locks(x);
     x->peers_connected = 0;
     x->multichannel = false;
     x->max_out_channels = 8;
+    x->max_in_channels = 1;
     x->fixchannels = false;
     x->json = false;
     x->frame_size = 480;
@@ -1066,7 +1240,28 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
                 user_had_other_flags = true;
             } else if (strcmp(flag, "-b") == 0) {
                 user_had_other_flags = true;
-                x->frame_size = atom_getfloat(argv + i + 1);
+                user_had_other_flags = true;
+                x->frame_size = atom_getint(argv + i + 1);
+
+                switch (x->frame_size) {
+                case 120:  /* 2.5 ms */
+                case 240:  /* 5 ms */
+                case 480:  /* 10 ms */
+                case 960:  /* 20 ms */
+                case 1920: /* 40 ms */
+                case 2880: /* 60 ms */
+                    break;
+
+                default:
+                    pd_error(x,
+                             "[p2p~] Invalid Opus frame size %d "
+                             "(must be 120, 240, 480, 960, 1920, or 2880 samples)",
+                             x->frame_size);
+                    delete x->state;
+                    x->state = nullptr;
+                    p2p_destroy_codec_locks(x);
+                    return NULL;
+                }
                 i++;
             } else if (strcmp(flag, "-sr") == 0) {
                 x->direction = rtc::Description::Direction::SendRecv;
@@ -1083,46 +1278,54 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
         }
     }
 
+    if (x->max_out_channels < 1 || x->max_out_channels > 1000) {
+        pd_error(x, "[p2p~] Min for output is 1 and max is 1000");
+        x->max_out_channels = 8;
+    }
+
+    if (p2p_create_encoder(x, &x->opus_enc_mono, 1) != 0 ||
+        p2p_create_encoder(x, &x->opus_enc_stereo, 2) != 0) {
+        p2p_destroy_codecs(x);
+        delete x->state;
+        x->state = nullptr;
+        p2p_destroy_codec_locks(x);
+        return nullptr;
+    }
+
+    x->out_signals_count = x->multichannel ? x->max_out_channels : 1;
+    x->out_signals = (t_outlet **)getbytes(x->out_signals_count * sizeof(*x->out_signals));
+    if (!x->out_signals) {
+        pd_error(x, "[p2p~] could not allocate signal outlets");
+        p2p_destroy_codecs(x);
+        delete x->state;
+        x->state = nullptr;
+        p2p_destroy_codec_locks(x);
+        return nullptr;
+    }
+
+    for (int i = 0; i < x->out_signals_count; i++) {
+        x->out_signals[i] = outlet_new(&x->x_obj, &s_signal);
+    }
+    x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
+
     x->state->nodes.reserve(x->max_out_channels);
     for (int i = 0; i < x->max_out_channels; i++) {
         auto node = std::make_unique<P2PNode>();
         node->channel_index = i;
-        node->frame_size = x->frame_size;
 
-        int err;
-        node->opus_enc = opus_encoder_create(node->sample_rate, 1, OPUS_APPLICATION_AUDIO, &err);
-        if (err != OPUS_OK) {
-            p2p_safelogpost(x, PD_ERROR, "Opus encoder error for node %d: %d", i, err);
-            return nullptr;
-        }
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_APPLICATION(OPUS_APPLICATION_AUDIO));
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
-
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_BITRATE(256000));
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_VBR(1));
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_VBR_CONSTRAINT(1));
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_COMPLEXITY(10));
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_INBAND_FEC(0));
-        opus_encoder_ctl(node->opus_enc, OPUS_SET_DTX(0));
-
-        node->opus_dec = opus_decoder_create(node->sample_rate, 1, &err);
-        if (err != OPUS_OK) {
-            p2p_safelogpost(x, PD_ERROR, "Opus decoder error for node %d: %d", i, err);
-        }
-
-        node->tx_thread = std::thread([node_ptr = node.get()]() {
+        node->tx_thread = std::thread([x, node_ptr = node.get()]() {
             constexpr int MAX_OPUS_BYTES = 4000;
             unsigned char opus_payload[MAX_OPUS_BYTES];
-            int FRAME_SIZE = node_ptr->frame_size; // 10 ms at 48 kHz
-            float pcm_frame[FRAME_SIZE];
+            const int frame_size = x->frame_size;
+            std::vector<float> pcm_frame(frame_size);
             int collected = 0;
 
             while (node_ptr->thread_running) {
-                while (collected < FRAME_SIZE && node_ptr->send_buffer.pop(pcm_frame[collected])) {
+                while (collected < frame_size && node_ptr->send_buffer.pop(pcm_frame[collected])) {
                     collected++;
                 }
 
-                if (collected < FRAME_SIZE) {
+                if (collected < frame_size) {
                     std::this_thread::sleep_for(std::chrono::microseconds(500));
                     continue;
                 }
@@ -1131,33 +1334,31 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
 
                 if (!node_ptr->is_streaming || !node_ptr->audio_track ||
                     !node_ptr->audio_track->isOpen() || !node_ptr->rtp_config ||
-                    !node_ptr->opus_enc) {
+                    !x->opus_enc_mono) {
                     continue;
                 }
 
-                int bytes = opus_encode_float(node_ptr->opus_enc, pcm_frame, FRAME_SIZE,
+                int bytes;
+                {
+                    std::lock_guard<std::mutex> lock(*x->opus_enc_mono_mutex);
+                    bytes = opus_encode_float(x->opus_enc_mono, pcm_frame.data(), frame_size,
                                               opus_payload, sizeof(opus_payload));
+                }
 
                 if (bytes <= 0) {
                     continue;
                 }
 
-                node_ptr->audio_track->send(reinterpret_cast<const std::byte *>(opus_payload),
-                                            static_cast<size_t>(bytes));
-                node_ptr->rtp_config->timestamp += FRAME_SIZE;
+                node_ptr->audio_track->sendFrame(reinterpret_cast<const std::byte *>(opus_payload),
+                                                 static_cast<size_t>(bytes),
+                                                 rtc::FrameInfo(node_ptr->rtp_config->timestamp));
+                node_ptr->rtp_config->timestamp += frame_size;
             }
         });
 
         x->state->nodes.push_back(std::move(node));
     }
 
-    if (x->max_out_channels < 1 || x->max_out_channels > 1000) {
-        pd_error(x, "[p2p~] Min for output is 1 and max is 1000");
-        x->max_out_channels = 8;
-    }
-
-    x->out_signals = outlet_new(&x->x_obj, &s_signal);
-    x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
     x->state->peers_channels.reserve(x->max_out_channels);
     return x;
 }
@@ -1183,6 +1384,15 @@ static void p2p_free(p2p_tilde *x) {
         }
         delete x->state;
         x->state = nullptr;
+    }
+
+    p2p_destroy_codecs(x);
+    p2p_destroy_codec_locks(x);
+
+    if (x->out_signals) {
+        freebytes(x->out_signals, x->out_signals_count * sizeof(*x->out_signals));
+        x->out_signals = nullptr;
+        x->out_signals_count = 0;
     }
 }
 
