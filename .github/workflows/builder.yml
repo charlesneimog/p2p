@@ -10,7 +10,7 @@ on:
                 default: false
 env:
     LIBNAME: p2p~
-    LIBVERSION: "0.1.0"
+    LIBVERSION: "0.1.1"
 permissions:
     contents: write
 jobs:

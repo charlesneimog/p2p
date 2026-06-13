@@ -1303,10 +1303,10 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
         return nullptr;
     }
 
+    x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
     for (int i = 0; i < x->out_signals_count; i++) {
         x->out_signals[i] = outlet_new(&x->x_obj, &s_signal);
     }
-    x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
 
     x->state->nodes.reserve(x->max_out_channels);
     for (int i = 0; i < x->max_out_channels; i++) {

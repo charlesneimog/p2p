@@ -69,6 +69,7 @@ set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 pd_add_external(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p~.cpp")
 pd_add_datafile(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/p2p~-help.pd")
+pd_add_datafile(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p~.cpp")
 
 target_include_directories(p2p_tilde PRIVATE "${opus_SOURCE_DIR}/include")
 target_link_libraries(
