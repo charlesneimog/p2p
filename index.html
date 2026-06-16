@@ -300,6 +300,15 @@
                         </button>
                     </div>
 
+                      <div>
+                        <button
+                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            id="video-test4"
+                        >
+                            Art
+                        </button>
+                    </div>
+
                     <script>
                         document.getElementById("video-test1").addEventListener("click", () => {
                             window.open("./tests/send-video/", "_blank");
@@ -309,6 +318,32 @@
                         });
                         document.getElementById("video-test3").addEventListener("click", () => {
                             window.open("./tests/send-receive-video/", "_blank");
+                        });
+                        document.getElementById("video-test4").addEventListener("click", () => {
+                            // check if it is connected to a room before opening the art test
+                            if (!network) {
+                                alert("Please connect to a room before opening the art test.");
+                                return;
+                            }
+
+                            const params = new URLSearchParams({
+                                room: roomInput.value.trim(),
+                                name: `${nameInput.value.trim()}_art`,
+                                "shape-morph": "35",
+                                "movement-amplitude": "60",
+                                dispersion: "0",
+                                "frame-randomness": "0",
+                                "phase-spread": "200",
+                                "length-variety": "100",
+                                "width-variety": "100",
+                                density: "500",
+                                "motion-speed": "1",
+                                "bend-variety": "100",
+                                "depth-variety": "100",
+                                "camera-scale": "220",
+                            });
+
+                            window.open(`./tests/manta-ray/?${params.toString()}`, "_blank");
                         });
                     </script>
                 </div>

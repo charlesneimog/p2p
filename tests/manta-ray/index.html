@@ -17,14 +17,21 @@
         display: block;
       }
 
+      #manta-canvas {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+      }
+
       .p2p-camera-panel {
         position: fixed;
         top: 14px;
         left: 14px;
         z-index: 10;
         display: flex;
-        align-items: center;
-        gap: 8px;
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
         max-width: calc(100vw - 28px);
         padding: 8px;
         color: #f6f8f8;
@@ -35,10 +42,21 @@
         backdrop-filter: blur(10px);
       }
 
+      .panel-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        max-width: 100%;
+      }
+
+      .parameter-row {
+        flex-wrap: nowrap;
+      }
+
       .p2p-camera-panel label {
         display: grid;
         gap: 2px;
-        min-width: 120px;
+        min-width: 112px;
       }
 
       .p2p-camera-panel span {
@@ -57,8 +75,14 @@
       }
 
       .p2p-camera-panel input {
-        width: 150px;
+        width: 136px;
         padding: 0 8px;
+      }
+
+      .p2p-camera-panel input[type="range"] {
+        width: 126px;
+        padding: 0;
+        accent-color: #6ee7d8;
       }
 
       .p2p-camera-panel button {
@@ -78,7 +102,8 @@
       }
 
       @media (max-width: 720px) {
-        .p2p-camera-panel {
+        .panel-row,
+        .parameter-row {
           align-items: stretch;
           flex-direction: column;
         }
@@ -89,22 +114,81 @@
           width: 100%;
           min-width: 0;
         }
+
+        .p2p-camera-panel input[type="range"] {
+          width: 100%;
+        }
       }
     </style>
   </head>
   <body>
+    <div id="manta-canvas"></div>
     <div class="p2p-camera-panel">
-      <label>
-        <span>Room</span>
-        <input id="p2p-room" autocomplete="off" />
-      </label>
-      <label>
-        <span>Name</span>
-        <input id="p2p-name" autocomplete="off" />
-      </label>
-      <button id="p2p-connect" type="button">Connect</button>
-      <button id="p2p-disconnect" type="button" disabled>Disconnect</button>
-      <div id="p2p-status">Disconnected</div>
+      <div class="panel-row">
+        <label>
+          <span>Room</span>
+          <input id="p2p-room" autocomplete="off" />
+        </label>
+        <label>
+          <span>Name</span>
+          <input id="p2p-name" autocomplete="off" />
+        </label>
+        <button id="p2p-connect" type="button">Connect</button>
+        <button id="p2p-disconnect" type="button" disabled>Disconnect</button>
+        <div id="p2p-status">Disconnected</div>
+      </div>
+      <div class="panel-row parameter-row">
+        <label>
+          <span>Line thickness</span>
+          <input id="shape-morph" type="range" min="0" max="35" value="35" />
+        </label>
+        <label>
+          <span>Movement</span>
+          <input id="movement-amplitude" type="range" min="0" max="200" value="60" />
+        </label>
+        <label>
+          <span>Dispersion</span>
+          <input id="dispersion" type="range" min="0" max="600" value="0" />
+        </label>
+        <label>
+          <span>Frame random</span>
+          <input id="frame-randomness" type="range" min="0" max="25" value="0" />
+        </label>
+        <label>
+          <span>Phase spread</span>
+          <input id="phase-spread" type="range" min="0" max="200" value="200" />
+        </label>
+        <label>
+          <span>Length variety</span>
+          <input id="length-variety" type="range" min="0" max="100" value="100" />
+        </label>
+      </div>
+      <div class="panel-row parameter-row">
+        <label>
+          <span>Width variety</span>
+          <input id="width-variety" type="range" min="0" max="100" value="100" />
+        </label>
+        <label>
+          <span>Line count</span>
+          <input id="density" type="range" min="0" max="500" value="500" />
+        </label>
+        <label>
+          <span>Speed</span>
+          <input id="motion-speed" type="range" min="0" max="250" value="1" />
+        </label>
+        <label>
+          <span>Bend variety</span>
+          <input id="bend-variety" type="range" min="0" max="100" value="100" />
+        </label>
+        <label>
+          <span>Depth variety</span>
+          <input id="depth-variety" type="range" min="0" max="100" value="100" />
+        </label>
+        <label>
+          <span>Camera scale</span>
+          <input id="camera-scale" type="range" min="45" max="220" value="220" />
+        </label>
+      </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
     <script src="../../p2p.js"></script>
