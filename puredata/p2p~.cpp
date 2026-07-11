@@ -14,10 +14,22 @@
 #include <cstdarg>
 #include <cstdio>
 #include <variant>
+#include <algorithm>
+#include <climits>
 
 #include <nlohmann/json.hpp>
 #include <rtc/rtc.hpp>
 #include <opus.h>
+
+#ifdef P2P_GEM_VIDEO
+#include "Gem/Image.h"
+#include "Gem/State.h"
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavutil/imgutils.h>
+#include <libswscale/swscale.h>
+}
+#endif
 
 #include <spdlog/spdlog.h>
 
@@ -53,6 +65,21 @@ struct P2PNode {
     std::shared_ptr<rtc::DataChannel> dc;
     std::shared_ptr<rtc::Track> audio_track;
 
+#ifdef P2P_GEM_VIDEO
+    std::shared_ptr<rtc::Track> video_track;
+    const AVCodec *video_codec = nullptr;
+    AVCodecContext *video_decoder = nullptr;
+    AVFrame *video_frame = nullptr;
+    AVFrame *rgba_frame = nullptr;
+    SwsContext *video_scaler = nullptr;
+    std::vector<unsigned char> rgba_pixels;
+    std::mutex video_mutex;
+    uint64_t video_serial = 0;
+    bool video_encoded_logged = false;
+    bool video_decoded_logged = false;
+    int video_decode_errors = 0;
+#endif
+
     // Audio buffers
     boost::lockfree::spsc_queue<float, boost::lockfree::capacity<16384>> send_buffer;
     boost::lockfree::spsc_queue<float, boost::lockfree::capacity<16384>> receive_buffer;
@@ -79,6 +106,13 @@ struct P2PNode {
             opus_decoder_destroy(opus_dec_mono);
             opus_dec_mono = nullptr;
         }
+#ifdef P2P_GEM_VIDEO
+        std::lock_guard<std::mutex> video_lock(video_mutex);
+        sws_freeContext(video_scaler);
+        av_frame_free(&rgba_frame);
+        av_frame_free(&video_frame);
+        avcodec_free_context(&video_decoder);
+#endif
     }
 };
 
@@ -111,6 +145,7 @@ struct p2p_tilde {
 
     bool json;
     bool wants_stream;
+    bool wants_video;
     bool multichannel;
     bool fixchannels;
     int max_out_channels;
@@ -120,6 +155,12 @@ struct p2p_tilde {
     t_outlet **out_signals;
     int out_signals_count;
     t_outlet *out_msgs;
+#ifdef P2P_GEM_VIDEO
+    t_outlet *out_gem;
+    pixBlock *gem_pix;
+    uint64_t gem_serial;
+    int gem_channel;
+#endif
 
     // json
     t_outlet **out_json_keys;
@@ -144,6 +185,13 @@ static void p2p_init_lifetime_fields(p2p_tilde *x) {
     x->out_signals = nullptr;
     x->out_signals_count = 0;
     x->out_msgs = nullptr;
+    x->wants_video = false;
+#ifdef P2P_GEM_VIDEO
+    x->out_gem = nullptr;
+    x->gem_pix = nullptr;
+    x->gem_serial = 0;
+    x->gem_channel = 0;
+#endif
     x->opus_enc_mono = nullptr;
     x->opus_enc_stereo = nullptr;
     x->opus_enc_mono_mutex = nullptr;
@@ -347,7 +395,7 @@ void p2p_request_stream_change(P2PNode *node, std::function<void()> action) {
 }
 
 // ─────────────────────────────────────
-static void p2p_disable_video_media(rtc::Description &description) {
+static void p2p_configure_video_media(p2p_tilde *x, rtc::Description &description) {
     for (int i = 0; i < description.mediaCount(); ++i) {
         auto media = description.media(i);
         if (!std::holds_alternative<rtc::Description::Media *>(media)) {
@@ -356,11 +404,163 @@ static void p2p_disable_video_media(rtc::Description &description) {
 
         auto *remote_media = std::get<rtc::Description::Media *>(media);
         if (remote_media && remote_media->type() == "video") {
+#ifdef P2P_GEM_VIDEO
+            if (!x->wants_video) {
+                remote_media->setDirection(rtc::Description::Direction::Inactive);
+                remote_media->markRemoved();
+                continue;
+            }
+            const auto offered_payloads = remote_media->payloadTypes();
+            std::vector<int> h264_payloads;
+            for (int payload : offered_payloads) {
+                const auto *map = remote_media->rtpMap(payload);
+                p2p_safelogpost(x, PD_NORMAL, "Offered video codec: PT %d %s", payload,
+                                map->format.c_str());
+                if (map && strcasecmp(map->format.c_str(), "H264") == 0) {
+                    h264_payloads.push_back(payload);
+                }
+            }
+
+            for (int payload : offered_payloads) {
+                // Removing a primary codec also removes its dependent RTX map.
+                // The payload list above is a snapshot, so guard every lookup.
+                if (!remote_media->hasPayloadType(payload)) continue;
+                const auto *map = remote_media->rtpMap(payload);
+                bool keep = strcasecmp(map->format.c_str(), "H264") == 0;
+                if (!keep && strcasecmp(map->format.c_str(), "RTX") == 0) {
+                    for (int h264_payload : h264_payloads) {
+                        const std::string apt = "apt=" + std::to_string(h264_payload);
+                        if (std::find(map->fmtps.begin(), map->fmtps.end(), apt) !=
+                            map->fmtps.end()) {
+                            keep = true;
+                            break;
+                        }
+                    }
+                }
+                if (!keep) {
+                    remote_media->removeRtpMap(payload);
+                }
+            }
+            if (!h264_payloads.empty()) {
+                // This is the remote offer: SendOnly reciprocates to RecvOnly in Pd's answer.
+                remote_media->setDirection(rtc::Description::Direction::SendOnly);
+                p2p_safelogpost(x, PD_NORMAL, "Accepting remote H264 video");
+            } else {
+                remote_media->setDirection(rtc::Description::Direction::Inactive);
+                remote_media->markRemoved();
+                p2p_safelogpost(x, PD_ERROR, "Peer did not offer H264; video disabled");
+            }
+#else
             remote_media->setDirection(rtc::Description::Direction::Inactive);
             remote_media->markRemoved();
+#endif
         }
     }
 }
+
+#ifdef P2P_GEM_VIDEO
+static bool p2p_init_video_decoder(P2PNode *node) {
+    std::lock_guard<std::mutex> lock(node->video_mutex);
+    if (node->video_decoder) return true;
+    node->video_codec = avcodec_find_decoder(AV_CODEC_ID_H264);
+    node->video_decoder = node->video_codec ? avcodec_alloc_context3(node->video_codec) : nullptr;
+    node->video_frame = av_frame_alloc();
+    node->rgba_frame = av_frame_alloc();
+    return node->video_decoder && node->video_frame && node->rgba_frame &&
+           avcodec_open2(node->video_decoder, node->video_codec, nullptr) >= 0;
+}
+
+static void p2p_decode_video_frame(p2p_tilde *x, P2PNode *node, const rtc::binary &data) {
+    std::lock_guard<std::mutex> lock(node->video_mutex);
+    if (!node->video_decoder) return;
+    if (data.empty()) {
+        if (node->video_decode_errors++ < 3) {
+            p2p_safelogpost(x, PD_ERROR, "Ignoring empty H264 access unit");
+        }
+        return;
+    }
+    if (!node->video_encoded_logged) {
+        node->video_encoded_logged = true;
+        p2p_safelogpost(x, PD_NORMAL, "Receiving encoded H264 frames from peer %s",
+                        node->remote_peer_id.c_str());
+    }
+    AVPacket *packet = av_packet_alloc();
+    if (!packet) return;
+    if (data.size() > static_cast<size_t>(INT_MAX) ||
+        av_new_packet(packet, static_cast<int>(data.size())) < 0) {
+        av_packet_free(&packet);
+        return;
+    }
+    memcpy(packet->data, data.data(), data.size());
+    int result = avcodec_send_packet(node->video_decoder, packet);
+    av_packet_free(&packet);
+    if (result < 0) {
+        if (node->video_decode_errors++ < 3) {
+            char error[AV_ERROR_MAX_STRING_SIZE];
+            av_strerror(result, error, sizeof(error));
+            p2p_safelogpost(x, PD_ERROR, "H264 access unit (%zu bytes) rejected: %s",
+                            data.size(), error);
+        }
+        if (result == AVERROR_EOF) avcodec_flush_buffers(node->video_decoder);
+        return;
+    }
+    while (avcodec_receive_frame(node->video_decoder, node->video_frame) == 0) {
+        const int width = node->video_frame->width;
+        const int height = node->video_frame->height;
+        node->rgba_pixels.resize(static_cast<size_t>(width) * height * 4);
+        node->video_scaler = sws_getCachedContext(
+            node->video_scaler, width, height,
+            static_cast<AVPixelFormat>(node->video_frame->format), width, height, AV_PIX_FMT_RGBA,
+            SWS_BILINEAR, nullptr, nullptr, nullptr);
+        if (!node->video_scaler) return;
+        uint8_t *dst[] = {node->rgba_pixels.data()};
+        int strides[] = {width * 4};
+        sws_scale(node->video_scaler, node->video_frame->data, node->video_frame->linesize, 0,
+                  height, dst, strides);
+        node->rgba_frame->width = width;
+        node->rgba_frame->height = height;
+        ++node->video_serial;
+        if (!node->video_decoded_logged) {
+            node->video_decoded_logged = true;
+            p2p_safelogpost(x, PD_NORMAL, "Decoded GEM video frame: %dx%d", width, height);
+        }
+    }
+}
+
+static void p2p_gem_state(p2p_tilde *x, t_symbol *, int argc, t_atom *argv) {
+    if (!x->out_gem) return;
+    if (argc != 2 || argv[0].a_type != A_POINTER || argv[1].a_type != A_POINTER) {
+        outlet_anything(x->out_gem, gensym("gem_state"), argc, argv);
+        return;
+    }
+    auto *state = reinterpret_cast<GemState *>(argv[1].a_w.w_gpointer);
+    pixBlock *previous = nullptr;
+    if (!state || !x->state || x->gem_channel < 0 ||
+        x->gem_channel >= static_cast<int>(x->state->nodes.size())) {
+        outlet_anything(x->out_gem, gensym("gem_state"), argc, argv);
+        return;
+    }
+    P2PNode *node = x->state->nodes[x->gem_channel].get();
+    std::lock_guard<std::mutex> lock(node->video_mutex);
+    if (node->video_serial && node->rgba_frame->width > 0) {
+        const int width = node->rgba_frame->width;
+        const int height = node->rgba_frame->height;
+        if (!x->gem_pix) x->gem_pix = new pixBlock();
+        x->gem_pix->image.xsize = width;
+        x->gem_pix->image.ysize = height;
+        x->gem_pix->image.setFormat(GEM_RGBA);
+        unsigned char *pixels = x->gem_pix->image.reallocate();
+        if (pixels) memcpy(pixels, node->rgba_pixels.data(), node->rgba_pixels.size());
+        x->gem_pix->image.upsidedown = true;
+        x->gem_pix->newimage = (x->gem_serial != node->video_serial);
+        x->gem_serial = node->video_serial;
+        state->get(GemState::_PIX, previous);
+        state->set(GemState::_PIX, x->gem_pix);
+    }
+    outlet_anything(x->out_gem, gensym("gem_state"), argc, argv);
+    state->set(GemState::_PIX, previous);
+}
+#endif
 
 // ─────────────────────────────────────
 static bool p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
@@ -442,6 +642,25 @@ static bool p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
         audio.addSSRC(node->audio_ssrc, "audio");
         node->audio_track = node->pc->addTrack(audio);
         install_sendrecv_handler(node->audio_track);
+#ifdef P2P_GEM_VIDEO
+        if (x->wants_video) {
+            rtc::Description::Video video("video", rtc::Description::Direction::RecvOnly);
+            video.addH264Codec(102);
+            node->video_track = node->pc->addTrack(video);
+            if (p2p_init_video_decoder(node)) {
+                auto video_handler = std::make_shared<rtc::H264RtpDepacketizer>();
+                video_handler->addToChain(std::make_shared<rtc::RtcpReceivingSession>());
+                node->video_track->setMediaHandler(video_handler);
+                node->video_track->onFrame([x, node](rtc::binary data, rtc::FrameInfo) {
+                    p2p_decode_video_frame(x, node, data);
+                });
+                node->video_track->onOpen([x, node]() {
+                    p2p_safelogpost(x, PD_NORMAL, "Remote H264 video track open for peer %s",
+                                    node->remote_peer_id.c_str());
+                });
+            }
+        }
+#endif
         node->audio_track->onFrame([x, node](rtc::binary data, rtc::FrameInfo info) {
             constexpr int MAX_SAMPLES = 5760;
             float pcm[MAX_SAMPLES];
@@ -475,8 +694,32 @@ static bool p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
     node->pc->onTrack([x, node, install_sendrecv_handler](std::shared_ptr<rtc::Track> track) {
         auto desc = track->description();
         if (desc.type() == "video") {
+#ifdef P2P_GEM_VIDEO
+            if (!x->wants_video) {
+                p2p_safelogpost(x, PD_NORMAL, "Video track rejected; create [p2p~ -v] to receive video");
+                track->close();
+                return;
+            }
+            if (!p2p_init_video_decoder(node)) {
+                p2p_safelogpost(x, PD_ERROR, "Could not initialize the H264 video decoder");
+                track->close();
+                return;
+            }
+            node->video_track = track;
+            auto handler = std::make_shared<rtc::H264RtpDepacketizer>();
+            handler->addToChain(std::make_shared<rtc::RtcpReceivingSession>());
+            track->setMediaHandler(handler);
+            track->onFrame([x, node](rtc::binary data, rtc::FrameInfo) {
+                p2p_decode_video_frame(x, node, data);
+            });
+            track->onOpen([x, node]() {
+                p2p_safelogpost(x, PD_NORMAL, "Remote H264 video active for peer %s",
+                                node->remote_peer_id.c_str());
+            });
+#else
             p2p_safelogpost(x, PD_NORMAL, "Video track rejected; video is not implemented yet");
             track->close();
+#endif
             return;
         } else if (desc.type() == "audio") {
             track->onOpen([x, node]() {
@@ -740,7 +983,7 @@ static void p2p_offer(p2p_tilde *x, json data) {
 
     try {
         rtc::Description desc(sdp_str, "offer");
-        p2p_disable_video_media(desc);
+        p2p_configure_video_media(x, desc);
         node->pc->setRemoteDescription(std::move(desc));
         node->remote_description_set = true;
         p2p_flush_pending_candidates(x, node);
@@ -1272,6 +1515,13 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
             } else if (strcmp(flag, "-r") == 0) {
                 x->direction = rtc::Description::Direction::RecvOnly;
                 p2p_safelogpost(x, PD_NORMAL, "Only Receive Audio");
+            } else if (strcmp(flag, "-v") == 0) {
+#ifdef P2P_GEM_VIDEO
+                x->wants_video = true;
+                p2p_safelogpost(x, PD_NORMAL, "Receive Video enabled");
+#else
+                pd_error(x, "[p2p~] -v unavailable: built without GEM video support");
+#endif
             } else {
                 p2p_safelogpost(x, PD_ERROR, "Unknown flag: %s", argv[i].a_w.w_symbol->s_name);
             }
@@ -1304,6 +1554,11 @@ static void *p2p_new(t_symbol *s, int argc, t_atom *argv) {
     }
 
     x->out_msgs = outlet_new(&x->x_obj, gensym("anything"));
+#ifdef P2P_GEM_VIDEO
+    if (x->wants_video) {
+        x->out_gem = outlet_new(&x->x_obj, gensym("gem_state"));
+    }
+#endif
     for (int i = 0; i < x->out_signals_count; i++) {
         x->out_signals[i] = outlet_new(&x->x_obj, &s_signal);
     }
@@ -1389,6 +1644,11 @@ static void p2p_free(p2p_tilde *x) {
     p2p_destroy_codecs(x);
     p2p_destroy_codec_locks(x);
 
+#ifdef P2P_GEM_VIDEO
+    delete x->gem_pix;
+    x->gem_pix = nullptr;
+#endif
+
     if (x->out_signals) {
         freebytes(x->out_signals, x->out_signals_count * sizeof(*x->out_signals));
         x->out_signals = nullptr;
@@ -1412,6 +1672,9 @@ extern "C" void p2p_tilde_setup(void) {
     class_addmethod(p2p_tilde_class, (t_method)p2p_message, gensym("message"), A_GIMME, 0);
     class_addmethod(p2p_tilde_class, (t_method)p2p_channel, gensym("setchannel"), A_SYMBOL, A_FLOAT,
                     0);
+#ifdef P2P_GEM_VIDEO
+    class_addmethod(p2p_tilde_class, (t_method)p2p_gem_state, gensym("gem_state"), A_GIMME, 0);
+#endif
 
     // p2p json
     p2p_class = class_new(gensym("p2p"), (t_newmethod)p2p_new, (t_method)p2p_free,

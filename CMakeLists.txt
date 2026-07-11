@@ -32,6 +32,18 @@ endif()
 include(${CPM_FILE})
 
 find_package(Boost REQUIRED)
+find_package(PkgConfig QUIET)
+
+option(P2P_GEM_VIDEO "Build the GEM/WebRTC video receiver" ON)
+if(P2P_GEM_VIDEO AND PkgConfig_FOUND)
+    pkg_check_modules(
+        FFMPEG
+        QUIET
+        IMPORTED_TARGET
+        libavcodec
+        libavutil
+        libswscale)
+endif()
 
 # ╭──────────────────────────────────────╮
 # │             Dependências             │
@@ -64,6 +76,25 @@ cpmaddpackage(
     "OPUS_BUILD_TESTING OFF"
     "OPUS_BUILD_PROGRAMS OFF")
 
+if(P2P_GEM_VIDEO)
+    cpmaddpackage(
+        NAME
+        Gem
+        GITHUB_REPOSITORY
+        umlaeute/Gem
+        GIT_TAG
+        v0.95
+        DOWNLOAD_ONLY
+        YES)
+
+    # Gem's autotools build generates this header. We only consume its public
+    # ABI here, so generate the default configuration for external clients.
+    set(GEM_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/gem-generated")
+    file(MAKE_DIRECTORY "${GEM_GENERATED_INCLUDE_DIR}/Gem")
+    file(WRITE "${GEM_GENERATED_INCLUDE_DIR}/Gem/GemGLconfig.h"
+         "/* Generated for p2p~ consumers of Gem's public headers. */\n")
+endif()
+
 cpmaddpackage("gh:gabime/spdlog@1.17.0")
 set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -78,6 +109,33 @@ target_link_libraries(
             datachannel-static
             spdlog
             opus)
+
+if(P2P_GEM_VIDEO
+   AND Gem_ADDED
+   AND FFMPEG_FOUND)
+    target_compile_definitions(p2p_tilde PRIVATE P2P_GEM_VIDEO=1)
+    target_include_directories(
+        p2p_tilde PRIVATE "${GEM_GENERATED_INCLUDE_DIR}" "${Gem_SOURCE_DIR}/src")
+    # Pd does not guarantee that symbols from the separately loaded Gem external
+    # are globally visible. Compile the image ABI used by pixBlock into p2p~ so
+    # loading does not depend on Gem's dlopen visibility or load order.
+    target_sources(
+        p2p_tilde
+        PRIVATE "${Gem_SOURCE_DIR}/src/Gem/Image.cpp"
+                "${Gem_SOURCE_DIR}/src/Gem/PixConvert.cpp"
+                "${Gem_SOURCE_DIR}/src/Gem/PixConvertAltivec.cpp"
+                "${Gem_SOURCE_DIR}/src/Gem/PixConvertSSE2.cpp"
+                "${Gem_SOURCE_DIR}/src/Utils/SIMD.cpp"
+                "${Gem_SOURCE_DIR}/src/Utils/Thread.cpp")
+    if(UNIX)
+        target_compile_definitions(
+            p2p_tilde PRIVATE HAVE_UNISTD_H=1 HAVE_SYS_TIME_H=1 HAVE_SYS_TYPES_H=1)
+    endif()
+    target_link_libraries(p2p_tilde PRIVATE PkgConfig::FFMPEG)
+    message(STATUS "p2p~ GEM video support enabled (Gem source: ${Gem_SOURCE_DIR})")
+else()
+    message(STATUS "p2p~ GEM video support disabled; install FFmpeg development files or set P2P_GEM_VIDEO=OFF")
+endif()
 
 target_compile_options(
     p2p_tilde

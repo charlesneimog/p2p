@@ -1,4 +1,3 @@
-#include <m_pd.h>
 #include <string.h>
 #include <stdlib.h>
 #include <cstring>
@@ -20,6 +19,11 @@
 #include <spdlog/spdlog.h>
 
 #include <boost/lockfree/spsc_queue.hpp>
+
+#include <ext.h>
+#include <ext_buffer.h>
+#include <ext_obex.h>
+#include <z_dsp.h>
 
 using json = nlohmann::json;
 static t_class *p2p_class;

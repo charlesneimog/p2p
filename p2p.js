@@ -5,6 +5,7 @@ class SimpleP2P {
         this.serverUrl = serverUrl;
         this.myId = null;
         this.ws = null;
+        this.connectReady = Promise.resolve();
         this.peers = new Map();
         this.localStream = null;
         this.mediaDirections = {
@@ -42,21 +43,25 @@ class SimpleP2P {
             switch (msg.type) {
                 case "welcome":
                     this.myId = msg.id;
-                    this.onConnect(msg.id);
+                    this.connectReady = Promise.resolve(this.onConnect(msg.id));
+                    await this.connectReady;
                     break;
 
                 case "existing-peers":
+                    await this.connectReady;
                     for (const peer of msg.peers) {
                         await this._ensurePeer(peer.id, peer.name);
                     }
                     break;
 
                 case "peer-joined":
+                    await this.connectReady;
                     await this._ensurePeer(msg.from, msg.peer.name);
                     this.onPeerJoin(msg.from, msg.peer.name);
                     break;
 
                 case "offer":
+                    await this.connectReady;
                     await this._handleOffer(msg.from, msg.sdp);
                     break;
 
