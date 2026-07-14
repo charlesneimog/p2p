@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Send Location</title>
+        <style>
+            body {
+                max-width: 28rem;
+                margin: 3rem auto;
+                padding: 0 1rem;
+                font: 1rem system-ui, sans-serif;
+                color: #222;
+            }
+
+            label,
+            input,
+            button {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
+            }
+
+            input,
+            button {
+                margin: 0.4rem 0 1rem;
+                padding: 0.7rem;
+                font: inherit;
+            }
+
+            button {
+                cursor: pointer;
+            }
+
+            #status {
+                color: #555;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Send Location</h1>
+
+        <label for="room">Room</label>
+        <input id="room" value="node-alpha" />
+
+        <button id="connect" type="button">Connect and send location</button>
+        <p id="user"></p>
+        <p id="status">Disconnected</p>
+
+        <script src="../../p2p.js"></script>
+        <script>
+            const room = document.getElementById("room");
+            const connectButton = document.getElementById("connect");
+            const userName = `user_${Math.floor(Math.random() * 10000)
+                .toString()
+                .padStart(4, "0")}`;
+            document.getElementById("user").textContent = `User: ${userName}`;
+            const status = document.getElementById("status");
+            let network;
+            let locationWatch;
+            let sendInterval;
+            let lastPosition;
+
+            function sendLocation(position) {
+                if (!network) return;
+                lastPosition = position;
+
+                const message = JSON.stringify({
+                    coords: [userName, position.coords.latitude, position.coords.longitude],
+                });
+                let sent = 0;
+
+                for (const peer of network.peers.values()) {
+                    if (peer.name === "PureData" && peer.dc?.readyState === "open") {
+                        peer.dc.send(message);
+                        sent++;
+                    }
+                }
+
+                status.textContent = sent
+                    ? `Sent ${position.coords.latitude}, ${position.coords.longitude} to ${sent} PureData peer(s)`
+                    : "Location ready; waiting for PureData";
+            }
+
+            connectButton.onclick = () => {
+                const roomName = room.value.trim();
+                if (!roomName) return;
+
+                connectButton.disabled = true;
+                status.textContent = "Connecting…";
+                network = new SimpleP2P(roomName, userName);
+
+                network.onLog = (message) => {
+                    if (message.startsWith("DataChannel open") && lastPosition) sendLocation(lastPosition);
+                };
+
+                network.onConnect = () => {
+                    status.textContent = "Connected; requesting location…";
+                    locationWatch = navigator.geolocation.watchPosition(sendLocation, (error) => {
+                        status.textContent = error.message;
+                    });
+                    sendInterval = setInterval(() => {
+                        if (lastPosition) sendLocation(lastPosition);
+                    }, 100);
+                };
+
+                network.onPeerJoin = () => {
+                    if (lastPosition) sendLocation(lastPosition);
+                };
+
+                network.onError = () => {
+                    status.textContent = "Connection failed";
+                };
+
+                network.onDisconnect = () => {
+                    if (locationWatch !== undefined) navigator.geolocation.clearWatch(locationWatch);
+                    clearInterval(sendInterval);
+                    connectButton.disabled = false;
+                    status.textContent = "Disconnected";
+                    network = null;
+                };
+
+                network.connect();
+            };
+        </script>
+    </body>
+</html>

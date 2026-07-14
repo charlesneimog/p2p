@@ -42,6 +42,7 @@ let densityInput;
 let motionSpeedInput;
 let bendVarietyInput;
 let depthVarietyInput;
+let directionVarietyInput;
 let cameraScaleInput;
 let startupSliderValues = {
     "shape-morph": 35,
@@ -55,6 +56,7 @@ let startupSliderValues = {
     "motion-speed": 1,
     "bend-variety": 100,
     "depth-variety": 100,
+    "direction-variety": 0,
     "camera-scale": 220,
 };
 
@@ -127,6 +129,7 @@ function setupP2PCamera() {
     motionSpeedInput = document.getElementById("motion-speed");
     bendVarietyInput = document.getElementById("bend-variety");
     depthVarietyInput = document.getElementById("depth-variety");
+    directionVarietyInput = document.getElementById("direction-variety");
     cameraScaleInput = document.getElementById("camera-scale");
 
     let params = new URLSearchParams(window.location.search);
@@ -136,7 +139,7 @@ function setupP2PCamera() {
 
     p2pRoomInput.value = params.get("room") || "node-alpha";
     p2pNameInput.value = params.get("name") || `manta_ray_${randomId}`;
-    applyStartupSliderValues();
+    applyStartupSliderValues(params);
     p2pConnectBtn.onclick = connectP2PCamera;
     p2pDisconnectBtn.onclick = disconnectP2PCamera;
 
@@ -146,19 +149,33 @@ function setupP2PCamera() {
 }
 
 // ─────────────────────────────────────
-function applyStartupSliderValues() {
-    setSliderValue(shapeMorphInput, startupSliderValues["shape-morph"]);
-    setSliderValue(movementAmplitudeInput, startupSliderValues["movement-amplitude"]);
-    setSliderValue(dispersionInput, startupSliderValues.dispersion);
-    setSliderValue(frameRandomnessInput, startupSliderValues["frame-randomness"]);
-    setSliderValue(phaseSpreadInput, startupSliderValues["phase-spread"]);
-    setSliderValue(lengthVarietyInput, startupSliderValues["length-variety"]);
-    setSliderValue(widthVarietyInput, startupSliderValues["width-variety"]);
-    setSliderValue(densityInput, startupSliderValues.density);
-    setSliderValue(motionSpeedInput, startupSliderValues["motion-speed"]);
-    setSliderValue(bendVarietyInput, startupSliderValues["bend-variety"]);
-    setSliderValue(depthVarietyInput, startupSliderValues["depth-variety"]);
-    setSliderValue(cameraScaleInput, startupSliderValues["camera-scale"]);
+function applyStartupSliderValues(params) {
+    setSliderValue(shapeMorphInput, getStartupSliderValue(params, "shape-morph"));
+    setSliderValue(movementAmplitudeInput, getStartupSliderValue(params, "movement-amplitude"));
+    setSliderValue(dispersionInput, getStartupSliderValue(params, "dispersion"));
+    setSliderValue(frameRandomnessInput, getStartupSliderValue(params, "frame-randomness"));
+    setSliderValue(phaseSpreadInput, getStartupSliderValue(params, "phase-spread"));
+    setSliderValue(lengthVarietyInput, getStartupSliderValue(params, "length-variety"));
+    setSliderValue(widthVarietyInput, getStartupSliderValue(params, "width-variety"));
+    setSliderValue(densityInput, getStartupSliderValue(params, "density"));
+    setSliderValue(motionSpeedInput, getStartupSliderValue(params, "motion-speed"));
+    setSliderValue(bendVarietyInput, getStartupSliderValue(params, "bend-variety"));
+    setSliderValue(depthVarietyInput, getStartupSliderValue(params, "depth-variety"));
+    setSliderValue(directionVarietyInput, getStartupSliderValue(params, "direction-variety"));
+    setSliderValue(cameraScaleInput, getStartupSliderValue(params, "camera-scale"));
+}
+
+// ─────────────────────────────────────
+function getStartupSliderValue(params, key) {
+    let value = params?.get(key);
+
+    if (value === null || value === "") {
+        return startupSliderValues[key];
+    }
+
+    let numericValue = Number(value);
+
+    return Number.isFinite(numericValue) ? numericValue : startupSliderValues[key];
 }
 
 // ─────────────────────────────────────
@@ -438,6 +455,8 @@ function createRandomWings(count) {
             lengthScale: random(0.58, 1.72),
             bendScale: random(0.35, 1.85),
             depthScale: random(0.35, 2.4),
+            directionAngle: random(TWO_PI),
+            depthTilt: random(-320, 320),
             textureAnchor: createVector(random(), random()),
             textureRotation: random(TWO_PI),
             textureScale: random(0.45, 1.35),
@@ -594,6 +613,9 @@ function getCylinderUniforms(gl, program) {
         lengthScale: gl.getUniformLocation(program, "uLengthScale"),
         bendScale: gl.getUniformLocation(program, "uBendScale"),
         depthScale: gl.getUniformLocation(program, "uDepthScale"),
+        directionAngle: gl.getUniformLocation(program, "uDirectionAngle"),
+        depthTilt: gl.getUniformLocation(program, "uDepthTilt"),
+        directionVariety: gl.getUniformLocation(program, "uDirectionVariety"),
         widthVariety: gl.getUniformLocation(program, "uWidthVariety"),
         cameraScale: gl.getUniformLocation(program, "uCameraScale"),
         useCameraTexture: gl.getUniformLocation(program, "uUseCameraTexture"),
@@ -620,6 +642,7 @@ function drawGpuCylinders(theta, cameraTexture) {
     let widthVariety = getWidthVariety();
     let bendVariety = getBendVariety();
     let depthVariety = getDepthVariety();
+    let directionVariety = getDirectionVariety();
     let cameraScale = getCameraScale();
     let drawCount = getDensityCount();
 
@@ -639,6 +662,7 @@ function drawGpuCylinders(theta, cameraTexture) {
     gl.uniform1f(renderer.uniforms.dispersion, dispersion);
     gl.uniform1f(renderer.uniforms.frameRandomness, frameRandomness);
     gl.uniform1f(renderer.uniforms.widthVariety, widthVariety);
+    gl.uniform1f(renderer.uniforms.directionVariety, directionVariety);
     gl.uniform1f(renderer.uniforms.cameraScale, cameraScale);
     gl.uniform1i(renderer.uniforms.useCameraTexture, useCameraTexture ? 1 : 0);
 
@@ -657,6 +681,8 @@ function drawGpuCylinders(theta, cameraTexture) {
         gl.uniform1f(renderer.uniforms.lengthScale, lerp(1, wing.lengthScale, lengthVariety));
         gl.uniform1f(renderer.uniforms.bendScale, lerp(1, wing.bendScale, bendVariety));
         gl.uniform1f(renderer.uniforms.depthScale, lerp(1, wing.depthScale, depthVariety));
+        gl.uniform1f(renderer.uniforms.directionAngle, wing.directionAngle);
+        gl.uniform1f(renderer.uniforms.depthTilt, wing.depthTilt);
         gl.uniform2f(renderer.uniforms.textureAnchor, wing.textureAnchor.x, wing.textureAnchor.y);
         gl.uniform1f(renderer.uniforms.textureRotation, wing.textureRotation);
         gl.uniform1f(renderer.uniforms.textureScale, wing.textureScale);
@@ -760,6 +786,13 @@ function getDepthVariety() {
     if (!depthVarietyInput) return 1;
 
     return Number(depthVarietyInput.value) / 100;
+}
+
+// ─────────────────────────────────────
+function getDirectionVariety() {
+    if (!directionVarietyInput) return 0;
+
+    return Number(directionVarietyInput.value) / 100;
 }
 
 // ─────────────────────────────────────
@@ -880,6 +913,9 @@ uniform float uFrameRandomness;
 uniform float uLengthScale;
 uniform float uBendScale;
 uniform float uDepthScale;
+uniform float uDirectionAngle;
+uniform float uDepthTilt;
+uniform float uDirectionVariety;
 uniform float uWidthVariety;
 uniform float uCameraScale;
 uniform vec4 uCylinderWidthProfile;
@@ -935,7 +971,8 @@ float tangentAngle(float jointIndex, float baseAngle) {
 
 void main() {
     vec3 origin = vec3(uOrigin.xy * uDispersion, uOrigin.z * uDispersion * uDepthScale);
-    float baseAngle = uSide > 0.0 ? 0.0 : PI;
+    float defaultBaseAngle = uSide > 0.0 ? 0.0 : PI;
+    float baseAngle = mix(defaultBaseAngle, uDirectionAngle, uDirectionVariety);
     float t = aJoint / float(SEGMENT_COUNT);
     float morph = smoothstep(0.0, 1.0, uShapeMorph);
     float rootFade = smoothstep(0.0, 0.12, t);
@@ -950,7 +987,7 @@ void main() {
     vec2 position = jointPosition(aJoint, baseAngle, origin);
     vec3 worldPosition = vec3(
         position + normal * cos(aSideAngle) * radius * sideWidth * sideShape,
-        origin.z + sin(aSideAngle) * radius * sideDepth
+        origin.z + uDepthTilt * t * uDirectionVariety + sin(aSideAngle) * radius * sideDepth
     );
 
     vec2 stableUv = worldPosition.xy * uCameraScale + vec2(CAMERA_MIX_WIDTH * 0.5, CAMERA_MIX_HEIGHT * 0.5);
