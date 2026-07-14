@@ -424,7 +424,9 @@ static void p2p_configure_video_media(p2p_tilde *x, rtc::Description &descriptio
             for (int payload : offered_payloads) {
                 // Removing a primary codec also removes its dependent RTX map.
                 // The payload list above is a snapshot, so guard every lookup.
-                if (!remote_media->hasPayloadType(payload)) continue;
+                if (!remote_media->hasPayloadType(payload)) {
+                    continue;
+                }
                 const auto *map = remote_media->rtpMap(payload);
                 bool keep = strcasecmp(map->format.c_str(), "H264") == 0;
                 if (!keep && strcasecmp(map->format.c_str(), "RTX") == 0) {
@@ -459,9 +461,12 @@ static void p2p_configure_video_media(p2p_tilde *x, rtc::Description &descriptio
 }
 
 #ifdef P2P_GEM_VIDEO
+// ─────────────────────────────────────
 static bool p2p_init_video_decoder(P2PNode *node) {
     std::lock_guard<std::mutex> lock(node->video_mutex);
-    if (node->video_decoder) return true;
+    if (node->video_decoder) {
+        return true;
+    }
     node->video_codec = avcodec_find_decoder(AV_CODEC_ID_H264);
     node->video_decoder = node->video_codec ? avcodec_alloc_context3(node->video_codec) : nullptr;
     node->video_frame = av_frame_alloc();
@@ -470,9 +475,12 @@ static bool p2p_init_video_decoder(P2PNode *node) {
            avcodec_open2(node->video_decoder, node->video_codec, nullptr) >= 0;
 }
 
+// ─────────────────────────────────────
 static void p2p_decode_video_frame(p2p_tilde *x, P2PNode *node, const rtc::binary &data) {
     std::lock_guard<std::mutex> lock(node->video_mutex);
-    if (!node->video_decoder) return;
+    if (!node->video_decoder) {
+        return;
+    }
     if (data.empty()) {
         if (node->video_decode_errors++ < 3) {
             p2p_safelogpost(x, PD_ERROR, "Ignoring empty H264 access unit");
@@ -485,7 +493,9 @@ static void p2p_decode_video_frame(p2p_tilde *x, P2PNode *node, const rtc::binar
                         node->remote_peer_id.c_str());
     }
     AVPacket *packet = av_packet_alloc();
-    if (!packet) return;
+    if (!packet) {
+        return;
+    }
     if (data.size() > static_cast<size_t>(INT_MAX) ||
         av_new_packet(packet, static_cast<int>(data.size())) < 0) {
         av_packet_free(&packet);
@@ -498,21 +508,25 @@ static void p2p_decode_video_frame(p2p_tilde *x, P2PNode *node, const rtc::binar
         if (node->video_decode_errors++ < 3) {
             char error[AV_ERROR_MAX_STRING_SIZE];
             av_strerror(result, error, sizeof(error));
-            p2p_safelogpost(x, PD_ERROR, "H264 access unit (%zu bytes) rejected: %s",
-                            data.size(), error);
+            p2p_safelogpost(x, PD_ERROR, "H264 access unit (%zu bytes) rejected: %s", data.size(),
+                            error);
         }
-        if (result == AVERROR_EOF) avcodec_flush_buffers(node->video_decoder);
+        if (result == AVERROR_EOF) {
+            avcodec_flush_buffers(node->video_decoder);
+        }
         return;
     }
     while (avcodec_receive_frame(node->video_decoder, node->video_frame) == 0) {
         const int width = node->video_frame->width;
         const int height = node->video_frame->height;
         node->rgba_pixels.resize(static_cast<size_t>(width) * height * 4);
-        node->video_scaler = sws_getCachedContext(
-            node->video_scaler, width, height,
-            static_cast<AVPixelFormat>(node->video_frame->format), width, height, AV_PIX_FMT_RGBA,
-            SWS_BILINEAR, nullptr, nullptr, nullptr);
-        if (!node->video_scaler) return;
+        node->video_scaler =
+            sws_getCachedContext(node->video_scaler, width, height,
+                                 static_cast<AVPixelFormat>(node->video_frame->format), width,
+                                 height, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+        if (!node->video_scaler) {
+            return;
+        }
         uint8_t *dst[] = {node->rgba_pixels.data()};
         int strides[] = {width * 4};
         sws_scale(node->video_scaler, node->video_frame->data, node->video_frame->linesize, 0,
@@ -527,10 +541,13 @@ static void p2p_decode_video_frame(p2p_tilde *x, P2PNode *node, const rtc::binar
     }
 }
 
+// ─────────────────────────────────────
 static void p2p_gem_state(p2p_tilde *x, t_symbol *, int argc, t_atom *argv) {
-    if (!x->out_gem) return;
+    if (!x->out_gem) {
+        return;
+    }
     if (argc != 2 || argv[0].a_type != A_POINTER || argv[1].a_type != A_POINTER) {
-        outlet_anything(x->out_gem, gensym("gem_state"), argc, argv);
+        pd_error(x, "[p2p] Expected 2 pointers");
         return;
     }
     auto *state = reinterpret_cast<GemState *>(argv[1].a_w.w_gpointer);
@@ -545,12 +562,16 @@ static void p2p_gem_state(p2p_tilde *x, t_symbol *, int argc, t_atom *argv) {
     if (node->video_serial && node->rgba_frame->width > 0) {
         const int width = node->rgba_frame->width;
         const int height = node->rgba_frame->height;
-        if (!x->gem_pix) x->gem_pix = new pixBlock();
+        if (!x->gem_pix) {
+            x->gem_pix = new pixBlock();
+        }
         x->gem_pix->image.xsize = width;
         x->gem_pix->image.ysize = height;
         x->gem_pix->image.setFormat(GEM_RGBA);
         unsigned char *pixels = x->gem_pix->image.reallocate();
-        if (pixels) memcpy(pixels, node->rgba_pixels.data(), node->rgba_pixels.size());
+        if (pixels) {
+            memcpy(pixels, node->rgba_pixels.data(), node->rgba_pixels.size());
+        }
         x->gem_pix->image.upsidedown = true;
         x->gem_pix->newimage = (x->gem_serial != node->video_serial);
         x->gem_serial = node->video_serial;
@@ -696,7 +717,8 @@ static bool p2p_setup_webrtc_for_node(p2p_tilde *x, P2PNode *node) {
         if (desc.type() == "video") {
 #ifdef P2P_GEM_VIDEO
             if (!x->wants_video) {
-                p2p_safelogpost(x, PD_NORMAL, "Video track rejected; create [p2p~ -v] to receive video");
+                p2p_safelogpost(x, PD_NORMAL,
+                                "Video track rejected; create [p2p~ -v] to receive video");
                 track->close();
                 return;
             }
@@ -1252,13 +1274,13 @@ static void p2p_message(p2p_tilde *x, t_symbol *, int argc, t_atom *argv) {
 
 // ─────────────────────────────────────
 static void p2p_json(p2p_tilde *x, t_symbol *s, int argc, t_atom *argv) {
-    if (argc == 0 && (strcmp("json", s->s_name) == 0)) {
+    if (argc == 0 && (strcmp("json", s->s_name) == 0 || strcmp("symbol", s->s_name) == 0)) {
         pd_error(x, "[p2p~] Message is empty");
         return;
     }
 
     t_symbol *json_str;
-    if (strcmp("json", s->s_name) == 0) {
+    if (strcmp("json", s->s_name) == 0 || strcmp("symbol", s->s_name) == 0) {
         json_str = atom_getsymbol(argv);
     } else {
         json_str = s;
@@ -1266,29 +1288,53 @@ static void p2p_json(p2p_tilde *x, t_symbol *s, int argc, t_atom *argv) {
 
     try {
         json message = json::parse(json_str->s_name);
-        if (message.contains(x->jsonkey)) {
-            std::string value = message[x->jsonkey];
-            std::vector<t_atom> atoms;
-            char *buf = strdup(value.c_str());
-            char *tok = strtok(buf, " ");
-            while (tok) {
-                t_atom a;
-                char *endptr;
-                double f = strtod(tok, &endptr);
-                if (*endptr == '\0') {
-                    SETFLOAT(&a, f);
-                } else {
-                    SETSYMBOL(&a, gensym(tok));
-                }
-                atoms.push_back(a);
-                tok = strtok(nullptr, " ");
+        for (int i = 0; i < x->json_keys_count; ++i) {
+            const char *key = x->json_keys[i];
+            if (!key || !message.contains(key)) {
+                continue;
             }
-            outlet_list(x->out_msgs, &s_list, static_cast<int>(atoms.size()), atoms.data());
-            free(buf);
+
+            const json &value = message[key];
+            std::vector<t_atom> atoms;
+
+            if (value.is_array()) {
+                for (const auto &item : value) {
+                    t_atom a;
+                    if (item.is_number()) {
+                        SETFLOAT(&a, item.get<double>());
+                    } else if (item.is_string()) {
+                        SETSYMBOL(&a, gensym(item.get_ref<const std::string &>().c_str()));
+                    } else {
+                        continue;
+                    }
+                    atoms.push_back(a);
+                }
+            } else if (value.is_string()) {
+                char *buf = strdup(value.get_ref<const std::string &>().c_str());
+                char *tok = strtok(buf, " ");
+                while (tok) {
+                    t_atom a;
+                    char *endptr;
+                    double f = strtod(tok, &endptr);
+                    if (*endptr == '\0') {
+                        SETFLOAT(&a, f);
+                    } else {
+                        SETSYMBOL(&a, gensym(tok));
+                    }
+                    atoms.push_back(a);
+                    tok = strtok(nullptr, " ");
+                }
+                free(buf);
+            } else {
+                pd_error(x, "[p2p] JSON key '%s' must contain a string or array", key);
+                continue;
+            }
+
+            outlet_list(x->out_json_keys[i], &s_list, static_cast<int>(atoms.size()), atoms.data());
         }
 
-    } catch (const json::parse_error &e) {
-        p2p_safelogpost(x, PD_ERROR, "Invalid JSON: %s", e.what());
+    } catch (const json::exception &e) {
+        pd_error(x, "[p2p] Invalid JSON: %s", e.what());
     }
 }
 
@@ -1680,5 +1726,6 @@ extern "C" void p2p_tilde_setup(void) {
     p2p_class = class_new(gensym("p2p"), (t_newmethod)p2p_new, (t_method)p2p_free,
                           sizeof(p2p_tilde), CLASS_DEFAULT, A_GIMME, 0);
     class_addmethod(p2p_class, (t_method)p2p_json, gensym("json"), A_GIMME, 0);
+    class_addsymbol(p2p_class, (t_method)p2p_json_symbol);
     class_addanything(p2p_class, (t_method)p2p_json);
 }
