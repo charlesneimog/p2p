@@ -12,6 +12,10 @@ set(NO_WERROR ON)
 set(NO_TESTS ON)
 add_compile_options(-Wno-error=format)
 
+set(OPENSSL_USE_STATIC_LIBS TRUE)
+set(OPENSSL_MSVC_STATIC_RT TRUE)
+set(BUILD_SHARED_LIBS OFF)
+
 # ╭──────────────────────────────────────╮
 # │               pd.cmake               │
 # ╰──────────────────────────────────────╯
@@ -27,7 +31,7 @@ include_directories("${PD_SOURCES_PATH}")
 # ╰──────────────────────────────────────╯
 set(CPM_FILE ${CMAKE_BINARY_DIR}/CPM.cmake)
 if(NOT EXISTS "${CPM_FILE}")
-    file(DOWNLOAD "https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.42.1/CPM.cmake" ${CPM_FILE})
+    file(DOWNLOAD "https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.43.1/CPM.cmake" ${CPM_FILE})
 endif()
 include(${CPM_FILE})
 
@@ -44,6 +48,20 @@ if(P2P_GEM_VIDEO AND PkgConfig_FOUND)
         libavutil
         libswscale)
 endif()
+
+# ╭──────────────────────────────────────╮
+# │               OpenSSL                │
+# ╰──────────────────────────────────────╯
+cpmaddpackage(
+    URI
+    "gh:jimmy-park/openssl-cmake#3.6.0"
+    OPTIONS
+    "OPENSSL_USE_STATIC_LIBS ON"
+    "BUILD_SHARED_LIBS OFF"
+    "BUILD_EXAMPLES OFF"
+    "BUILD_TESTING OFF"
+    "CMAKE_OSX_DEPLOYMENT_TARGET=10.15"
+    "CMAKE_OSX_ARCHITECTURES=x86_64;arm64")
 
 # ╭──────────────────────────────────────╮
 # │             Dependências             │
@@ -87,8 +105,8 @@ if(P2P_GEM_VIDEO)
         DOWNLOAD_ONLY
         YES)
 
-    # Gem's autotools build generates this header. We only consume its public
-    # ABI here, so generate the default configuration for external clients.
+    # Gem's autotools build generates this header. We only consume its public ABI here, so generate the default
+    # configuration for external clients.
     set(GEM_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/gem-generated")
     file(MAKE_DIRECTORY "${GEM_GENERATED_INCLUDE_DIR}/Gem")
     file(WRITE "${GEM_GENERATED_INCLUDE_DIR}/Gem/GemGLconfig.h"
@@ -114,11 +132,9 @@ if(P2P_GEM_VIDEO
    AND Gem_ADDED
    AND FFMPEG_FOUND)
     target_compile_definitions(p2p_tilde PRIVATE P2P_GEM_VIDEO=1)
-    target_include_directories(
-        p2p_tilde PRIVATE "${GEM_GENERATED_INCLUDE_DIR}" "${Gem_SOURCE_DIR}/src")
-    # Pd does not guarantee that symbols from the separately loaded Gem external
-    # are globally visible. Compile the image ABI used by pixBlock into p2p~ so
-    # loading does not depend on Gem's dlopen visibility or load order.
+    target_include_directories(p2p_tilde PRIVATE "${GEM_GENERATED_INCLUDE_DIR}" "${Gem_SOURCE_DIR}/src")
+    # Pd does not guarantee that symbols from the separately loaded Gem external are globally visible. Compile the image
+    # ABI used by pixBlock into p2p~ so loading does not depend on Gem's dlopen visibility or load order.
     target_sources(
         p2p_tilde
         PRIVATE "${Gem_SOURCE_DIR}/src/Gem/Image.cpp"
@@ -128,8 +144,7 @@ if(P2P_GEM_VIDEO
                 "${Gem_SOURCE_DIR}/src/Utils/SIMD.cpp"
                 "${Gem_SOURCE_DIR}/src/Utils/Thread.cpp")
     if(UNIX)
-        target_compile_definitions(
-            p2p_tilde PRIVATE HAVE_UNISTD_H=1 HAVE_SYS_TIME_H=1 HAVE_SYS_TYPES_H=1)
+        target_compile_definitions(p2p_tilde PRIVATE HAVE_UNISTD_H=1 HAVE_SYS_TIME_H=1 HAVE_SYS_TYPES_H=1)
     endif()
     target_link_libraries(p2p_tilde PRIVATE PkgConfig::FFMPEG)
     message(STATUS "p2p~ GEM video support enabled (Gem source: ${Gem_SOURCE_DIR})")

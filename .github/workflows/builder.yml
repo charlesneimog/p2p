@@ -36,6 +36,7 @@ jobs:
                   export CXXFLAGS="-I$(brew --prefix boost)/include"
                   cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64"       -DBOOST_ROOT=$(brew --prefix boost) -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include
                   cmake --build build --parallel
+                  find build -name "*.so" -exec otool -L {} \;
             - name: Upload ONNX Folder
               uses: actions/upload-artifact@v4
               with:
