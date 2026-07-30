@@ -1,0 +1,14 @@
+#N canvas 180 120 620 390 12;
+#X declare -lib p2p;
+#X obj 42 69 p2p.config smoke;
+#X obj 42 142 sig~ 0;
+#X obj 42 175 p2p.s.audio~ smoke;
+#X obj 271 142 p2p.r.audio~ smoke alice;
+#X obj 271 175 env~;
+#X obj 42 248 loadbang;
+#X obj 42 281 delay 250;
+#X msg 42 314 \; pd quit;
+#X connect 1 0 2 0;
+#X connect 3 0 4 0;
+#X connect 5 0 6 0;
+#X connect 6 0 7 0;

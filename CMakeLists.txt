@@ -116,13 +116,26 @@ endif()
 cpmaddpackage("gh:gabime/spdlog@1.17.0")
 set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-pd_add_external(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p~.cpp")
-pd_add_datafile(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/p2p~-help.pd")
-pd_add_datafile(p2p~ "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p~.cpp")
+set(P2P_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/p2p_setup.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/P2PMainThreadDispatch.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/P2PPeer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/P2PSession.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/P2PSessionRegistry.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/p2p_config.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/p2p_s_audio.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/p2p_r_audio.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/p2p_r_video.cpp")
 
-target_include_directories(p2p_tilde PRIVATE "${opus_SOURCE_DIR}/include")
+pd_add_external(p2p "${P2P_SOURCES}")
+pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p-test.pd")
+pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p-smoke.pd")
+pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p-tls-smoke.pd")
+pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/TESTING.md")
+
+target_include_directories(p2p PRIVATE "${opus_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p")
 target_link_libraries(
-    p2p_tilde
+    p2p
     PRIVATE nlohmann_json::nlohmann_json
             datachannel-static
             spdlog
@@ -131,12 +144,12 @@ target_link_libraries(
 if(P2P_GEM_VIDEO
    AND Gem_ADDED
    AND FFMPEG_FOUND)
-    target_compile_definitions(p2p_tilde PRIVATE P2P_GEM_VIDEO=1)
-    target_include_directories(p2p_tilde PRIVATE "${GEM_GENERATED_INCLUDE_DIR}" "${Gem_SOURCE_DIR}/src")
+    target_compile_definitions(p2p PRIVATE P2P_GEM_VIDEO=1)
+    target_include_directories(p2p PRIVATE "${GEM_GENERATED_INCLUDE_DIR}" "${Gem_SOURCE_DIR}/src")
     # Pd does not guarantee that symbols from the separately loaded Gem external are globally visible. Compile the image
     # ABI used by pixBlock into p2p~ so loading does not depend on Gem's dlopen visibility or load order.
     target_sources(
-        p2p_tilde
+        p2p
         PRIVATE "${Gem_SOURCE_DIR}/src/Gem/Image.cpp"
                 "${Gem_SOURCE_DIR}/src/Gem/PixConvert.cpp"
                 "${Gem_SOURCE_DIR}/src/Gem/PixConvertAltivec.cpp"
@@ -144,16 +157,16 @@ if(P2P_GEM_VIDEO
                 "${Gem_SOURCE_DIR}/src/Utils/SIMD.cpp"
                 "${Gem_SOURCE_DIR}/src/Utils/Thread.cpp")
     if(UNIX)
-        target_compile_definitions(p2p_tilde PRIVATE HAVE_UNISTD_H=1 HAVE_SYS_TIME_H=1 HAVE_SYS_TYPES_H=1)
+        target_compile_definitions(p2p PRIVATE HAVE_UNISTD_H=1 HAVE_SYS_TIME_H=1 HAVE_SYS_TYPES_H=1)
     endif()
-    target_link_libraries(p2p_tilde PRIVATE PkgConfig::FFMPEG)
+    target_link_libraries(p2p PRIVATE PkgConfig::FFMPEG)
     message(STATUS "p2p~ GEM video support enabled (Gem source: ${Gem_SOURCE_DIR})")
 else()
     message(STATUS "p2p~ GEM video support disabled; install FFmpeg development files or set P2P_GEM_VIDEO=OFF")
 endif()
 
 target_compile_options(
-    p2p_tilde
+    p2p
     PRIVATE $<$<CONFIG:Release>:
             $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-O3>
             $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-ffunction-sections>
@@ -172,7 +185,7 @@ target_compile_options(
 set_target_properties(opus PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(p2p_tilde PRIVATE -g)
+    target_compile_options(p2p PRIVATE -g)
 endif()
 
 execute_process(
