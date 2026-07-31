@@ -14,6 +14,10 @@ The collection provides:
 All objects belonging to one connection use the same session name as their
 first argument.
 
+## Testing
+
+Use [https://charlesneimog.github.io/p2p/](https://charlesneimog.github.io/p2p/) to test the objects. Do not use this for your pieces, I can change this when I want! Check [`signaling-server`](signaling-server) directory to configure your server, it is easy and free!
+
 ## Compile
 
 Requirements are CMake 3.30 or newer, a C/C++ compiler, Boost, and the Pure
