@@ -1,103 +1,66 @@
-# p2p~
+# p2p
 
-## Receiving video in GEM
+`p2p` is a collection of Pure Data and Max/MSP externals for sending audio,
+video, and messages directly between peers using WebRTC. A small signaling
+server introduces users in the same room; media then travels peer to peer.
 
-When built with GEM and FFmpeg support, the Pure Data object accepts GEM's render list and
-places the latest received WebRTC video frame on it. The receiver currently negotiates H.264.
+The collection provides:
 
-```text
-[gemhead]
-|
-[p2p~ -v]
-|
-[pix_texture]
-|
-[rectangle 5.33 3]
-```
+- `p2p.config` — manages a named session and its connection
+- `p2p.s.audio~` — sends an audio signal
+- `p2p.r.audio~` — receives audio from a named user
+- `p2p.r.video` — receives video through GEM (Pd) or Jitter (Max)
 
-Video reception and its GEM outlet are created only when `[p2p~]` has the `-v` flag. GEM's
-source is fetched automatically with CPM. CMake enables the feature when it also finds
-the `libavcodec`, `libavutil`, and `libswscale` pkg-config modules. Load GEM before creating
-`[p2p~]`, because the external uses GEM's `pixBlock` and `GemState` ABI. To build without the
-video integration, configure with `-DP2P_GEM_VIDEO=OFF`.
+All objects belonging to one connection use the same session name as their
+first argument.
 
-A Pure Data external for peer-to-peer audio streaming using WebRTC. 
+## Compile
 
-## Max/MSP and Jitter
+Requirements are CMake 3.30 or newer, a C/C++ compiler, Boost, and the Pure
+Data development headers. Dependencies are downloaded automatically. FFmpeg
+development libraries are optional and enable video support.
 
-The Max port follows the split-object API used by the current Pure Data version:
-
-```text
-[p2p.config session]
-[p2p.s.audio~ session]
-[p2p.r.audio~ session username]
-[p2p.r.video session username]
-```
-
-Send `connect URL room username`, `stream 1`, `message ...`, `json ...`,
-`report`, and `disconnect` to `p2p.config`. Bang `p2p.r.video` to output the
-latest decoded frame as a named 4-plane `char` RGBA `jit_matrix`; connect it
-directly to `jit.pwindow`, `jit.world`, or another Jitter object.
-
-Create `[p2p.r.video session username]` before sending `connect` to
-`[p2p.config session]`. Either object may be created first: the video receiver
-registers the shared session immediately, so the later connection includes
-recv-only H.264 in its initial WebRTC negotiation.
-
-Configure the Max build with:
+For Pure Data only:
 
 ```sh
-cmake -S . -B build-max -DP2P_BUILD_MAX=ON \
-  -DP2P_GEM_VIDEO=OFF
-cmake --build build-max --config Release
+cmake -S . -B build -DP2P_BUILD_MAX=OFF
+cmake --build build --config Release
 ```
 
-To build only the Max package, use
-`cmake --build build-max --target p2p_max_package`.
+For Max/MSP only:
 
-When `MAX_SDK_PATH` is omitted, CMake fetches Cycling '74's official
-`max-sdk-base` automatically. To use a local checkout instead, pass
-`-DMAX_SDK_PATH=/path/to/max-sdk-base`.
+```sh
+cmake -S . -B build-max -DP2P_BUILD_MAX=ON -DP2P_GEM_VIDEO=OFF
+cmake --build build-max --target p2p_max_package --config Release
+```
 
-The resulting self-contained externals are placed in
-`build-max/p2p-max-package/externals`. The common P2P core is linked
-statically into each external. The objects share sessions through a
-process-wide registry anchored in Max itself, so no companion dylib is needed.
+If `MAX_SDK_PATH` is not set, CMake downloads Cycling '74's `max-sdk-base`.
+The Max externals are written to `build-max/p2p-max-package/externals`.
 
-Use a fresh build directory when changing macOS architectures. On Apple
-Silicon the default native `arm64` build is recommended. An Intel build needs
-an `x86_64` OpenSSL toolchain as well; an ARM-only Homebrew OpenSSL from
-`/opt/homebrew` cannot be linked into an Intel external.
+## Examples
 
-## Basic Usage
+### Pure Data
 
-<img src="resources/help.png" width="600">
+<img src="resources/pd.png" alt="Pure Data p2p patch example" width="420">
 
-## Server
+### Max/MSP
 
-You need to create your own server (cloudflare offers a free one) to run this. Check the `signaling-server` folder.
+<img src="resources/max.jpeg" alt="Max/MSP p2p patch example" width="420">
 
-## Connection Flow
+## Basic use
 
-1. Create `[p2p~]`;
-2. Send `connect URL room username`;
-3. Turn on stream;
-4. Output shows peer count via `peers` message.
+Create the objects with a shared session name, then send the following message
+to `p2p.config`:
 
-## Outputs
+```text
+connect wss://your-server.example room-name username
+```
 
-- Left outlet: audio signals (multichannel)
-- Right outlet: messages (`peers`, `json` data)
+Use `stream 1` to start sending audio and `disconnect` to leave the room. See
+[`p2p-help.pd`](p2p-help.pd) for a complete Pure Data patch.
 
-## Options
+## Signaling server
 
-| Flag | Description |
-|------|-------------|
-| `-o N` | Multi-channel mode with N outputs |
-| `-f` | Fixed channel mapping with `setchannel` |
-| `-json key` | Parse incoming JSON messages |
-
-## Messages
-
-- `peers` - outlet reports number of connected peers
-- `setchannel user channel` - assign user to output channel (-f mode only)
+A signaling server is required to establish peer connections. The included
+Cloudflare Workers implementation and deployment instructions are in the
+[`signaling-server`](signaling-server) directory.
