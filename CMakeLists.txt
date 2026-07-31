@@ -55,20 +55,10 @@ endif()
 include(${CPM_FILE})
 
 find_package(Boost REQUIRED)
-find_package(PkgConfig QUIET)
 
 option(P2P_GEM_VIDEO "Build the GEM/WebRTC video receiver" ON)
 option(P2P_BUILD_MAX "Build the Max/MSP + Jitter object family" ON)
 set(MAX_SDK_PATH "" CACHE PATH "Path to the Cycling '74 max-sdk checkout")
-if((P2P_GEM_VIDEO OR P2P_BUILD_MAX) AND PkgConfig_FOUND)
-    pkg_check_modules(
-        FFMPEG
-        QUIET
-        IMPORTED_TARGET
-        libavcodec
-        libavutil
-        libswscale)
-endif()
 
 # ╭──────────────────────────────────────╮
 # │               OpenSSL                │
@@ -126,6 +116,126 @@ cpmaddpackage(
     "OPUS_BUILD_TESTING OFF"
     "OPUS_BUILD_PROGRAMS OFF")
 
+if(P2P_GEM_VIDEO OR P2P_BUILD_MAX)
+    # FFmpeg does not provide a CMake build. Let CPM own source acquisition and
+    # use its supported configure/Make build to produce only the static, PIC
+    # libraries needed for H.264 decoding and RGBA conversion.
+    cpmaddpackage(
+        NAME ffmpeg
+        GITHUB_REPOSITORY FFmpeg/FFmpeg
+        GIT_TAG n7.1.5
+        DOWNLOAD_ONLY YES)
+
+    include(ExternalProject)
+    include(ProcessorCount)
+    find_package(Threads REQUIRED)
+    find_program(FFMPEG_SHELL NAMES sh bash REQUIRED)
+    find_program(FFMPEG_MAKE NAMES gmake make mingw32-make REQUIRED)
+    ProcessorCount(FFMPEG_BUILD_JOBS)
+    if(NOT FFMPEG_BUILD_JOBS)
+        set(FFMPEG_BUILD_JOBS 2)
+    endif()
+
+    set(FFMPEG_INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/ffmpeg-install")
+    set(FFMPEG_LIBRARY_DIR "${FFMPEG_INSTALL_DIR}/lib")
+    set(FFMPEG_INCLUDE_DIR "${FFMPEG_INSTALL_DIR}/include")
+    file(MAKE_DIRECTORY "${FFMPEG_INCLUDE_DIR}")
+
+    set(FFMPEG_CONFIGURE_OPTIONS
+        --prefix=${FFMPEG_INSTALL_DIR}
+        --disable-shared
+        --enable-static
+        --enable-pic
+        --disable-autodetect
+        --disable-programs
+        --disable-doc
+        --disable-debug
+        --disable-network
+        --disable-iconv
+        --disable-avdevice
+        --disable-avfilter
+        --disable-avformat
+        --disable-swresample
+        --disable-postproc
+        --disable-everything
+        --enable-avcodec
+        --enable-avutil
+        --enable-swscale
+        --enable-decoder=h264
+        --enable-parser=h264)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64|i.86)$")
+        # Some of FFmpeg's x86 inline assembly still emits non-PIC relocations
+        # even with --enable-pic, which cannot be linked into Pd/Max modules.
+        list(APPEND FFMPEG_CONFIGURE_OPTIONS --disable-x86asm --disable-inline-asm)
+    endif()
+    if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+        list(LENGTH CMAKE_OSX_ARCHITECTURES FFMPEG_OSX_ARCH_COUNT)
+        if(NOT FFMPEG_OSX_ARCH_COUNT EQUAL 1)
+            message(FATAL_ERROR "The static FFmpeg build requires one CMAKE_OSX_ARCHITECTURES value")
+        endif()
+        list(GET CMAKE_OSX_ARCHITECTURES 0 FFMPEG_OSX_ARCH)
+        list(APPEND FFMPEG_CONFIGURE_OPTIONS
+            --arch=${FFMPEG_OSX_ARCH}
+            "--extra-cflags=-arch ${FFMPEG_OSX_ARCH}"
+            "--extra-ldflags=-arch ${FFMPEG_OSX_ARCH}")
+    endif()
+
+    ExternalProject_Add(
+        ffmpeg_static
+        SOURCE_DIR "${ffmpeg_SOURCE_DIR}"
+        BINARY_DIR "${ffmpeg_BINARY_DIR}/static-build"
+        CONFIGURE_COMMAND
+            "${CMAKE_COMMAND}" -E env
+                "CC=${CMAKE_C_COMPILER}"
+                "AR=${CMAKE_AR}"
+                "RANLIB=${CMAKE_RANLIB}"
+                "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+                "${FFMPEG_SHELL}" "${ffmpeg_SOURCE_DIR}/configure"
+                ${FFMPEG_CONFIGURE_OPTIONS}
+        BUILD_COMMAND "${FFMPEG_MAKE}" clean
+        COMMAND "${FFMPEG_MAKE}" -j${FFMPEG_BUILD_JOBS}
+        INSTALL_COMMAND "${FFMPEG_MAKE}" install
+        BUILD_BYPRODUCTS
+            "${FFMPEG_LIBRARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}avcodec${CMAKE_STATIC_LIBRARY_SUFFIX}"
+            "${FFMPEG_LIBRARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}avutil${CMAKE_STATIC_LIBRARY_SUFFIX}"
+            "${FFMPEG_LIBRARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}swscale${CMAKE_STATIC_LIBRARY_SUFFIX}"
+        USES_TERMINAL_BUILD YES
+        USES_TERMINAL_INSTALL YES)
+
+    foreach(FFMPEG_COMPONENT avutil avcodec swscale)
+        add_library(ffmpeg_${FFMPEG_COMPONENT} STATIC IMPORTED GLOBAL)
+        add_library(FFmpeg::${FFMPEG_COMPONENT} ALIAS ffmpeg_${FFMPEG_COMPONENT})
+        set_target_properties(
+            ffmpeg_${FFMPEG_COMPONENT} PROPERTIES
+            IMPORTED_LOCATION
+                "${FFMPEG_LIBRARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${FFMPEG_COMPONENT}${CMAKE_STATIC_LIBRARY_SUFFIX}"
+            INTERFACE_INCLUDE_DIRECTORIES "${FFMPEG_INCLUDE_DIR}")
+        add_dependencies(ffmpeg_${FFMPEG_COMPONENT} ffmpeg_static)
+    endforeach()
+    target_link_libraries(ffmpeg_avutil INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
+    target_link_libraries(ffmpeg_avcodec INTERFACE FFmpeg::avutil)
+    target_link_libraries(ffmpeg_swscale INTERFACE FFmpeg::avutil)
+    if(UNIX)
+        target_link_libraries(ffmpeg_avutil INTERFACE m)
+    endif()
+    include(CheckLibraryExists)
+    check_library_exists(atomic __atomic_load_8 "" FFMPEG_HAVE_LIBATOMIC)
+    if(FFMPEG_HAVE_LIBATOMIC)
+        target_link_libraries(ffmpeg_avutil INTERFACE atomic)
+    endif()
+    if(WIN32)
+        target_link_libraries(ffmpeg_avutil INTERFACE bcrypt)
+    endif()
+
+    add_library(ffmpeg_required INTERFACE)
+    add_library(FFmpeg::required ALIAS ffmpeg_required)
+    target_link_libraries(
+        ffmpeg_required INTERFACE
+        FFmpeg::avcodec
+        FFmpeg::swscale
+        FFmpeg::avutil)
+endif()
+
 if(P2P_GEM_VIDEO)
     cpmaddpackage(
         NAME
@@ -174,8 +284,7 @@ target_link_libraries(
             opus)
 
 if(P2P_GEM_VIDEO
-   AND Gem_ADDED
-   AND FFMPEG_FOUND)
+   AND Gem_ADDED)
     target_compile_definitions(p2p PRIVATE P2P_GEM_VIDEO=1)
     target_include_directories(p2p PRIVATE "${GEM_GENERATED_INCLUDE_DIR}" "${Gem_SOURCE_DIR}/src")
     # Pd does not guarantee that symbols from the separately loaded Gem external are globally visible. Compile the image
@@ -191,10 +300,10 @@ if(P2P_GEM_VIDEO
     if(UNIX)
         target_compile_definitions(p2p PRIVATE HAVE_UNISTD_H=1 HAVE_SYS_TIME_H=1 HAVE_SYS_TYPES_H=1)
     endif()
-    target_link_libraries(p2p PRIVATE PkgConfig::FFMPEG)
+    target_link_libraries(p2p PRIVATE FFmpeg::required)
     message(STATUS "p2p~ GEM video support enabled (Gem source: ${Gem_SOURCE_DIR})")
 else()
-    message(STATUS "p2p~ GEM video support disabled; install FFmpeg development files or set P2P_GEM_VIDEO=OFF")
+    message(STATUS "p2p~ GEM video support disabled; set P2P_GEM_VIDEO=ON to enable it")
 endif()
 
 target_compile_options(
@@ -289,15 +398,11 @@ if(P2P_BUILD_MAX)
         POSITION_INDEPENDENT_CODE ON
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/max-static")
 
-    if(FFMPEG_FOUND)
-        target_compile_definitions(p2p_max_core PUBLIC P2P_JITTER_VIDEO=1)
-        # P2PPeer.hpp exposes FFmpeg frame types when video is enabled, so the
-        # four frontend targets also require FFmpeg's include directories.
-        target_link_libraries(p2p_max_core PUBLIC PkgConfig::FFMPEG)
-        message(STATUS "Max/Jitter H264 video support enabled")
-    else()
-        message(STATUS "Max/Jitter video disabled: FFmpeg development files not found")
-    endif()
+    target_compile_definitions(p2p_max_core PUBLIC P2P_JITTER_VIDEO=1)
+    # P2PPeer.hpp exposes FFmpeg frame types when video is enabled, so the
+    # four frontend targets also require FFmpeg's include directories.
+    target_link_libraries(p2p_max_core PUBLIC FFmpeg::required)
+    message(STATUS "Max/Jitter H264 video support enabled")
 
     function(p2p_add_max_external target output_name source)
         string(REPLACE "_" "-" bundle_identifier_suffix "${target}")

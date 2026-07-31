@@ -20,9 +20,9 @@ Use [https://charlesneimog.github.io/p2p/](https://charlesneimog.github.io/p2p/)
 
 ## Compile
 
-Requirements are CMake 3.30 or newer, a C/C++ compiler, Boost, and the Pure
-Data development headers. Dependencies are downloaded automatically. FFmpeg
-development libraries are optional and enable video support.
+Requirements are CMake 3.30 or newer, a C/C++ compiler, Boost, Make, and the
+Pure Data development headers. Dependencies, including a minimal static
+FFmpeg build for video support, are downloaded automatically.
 
 For Pure Data only:
 
