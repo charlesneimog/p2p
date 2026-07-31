@@ -9,12 +9,31 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(BUILD_SHARED_LIBS OFF)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
 set(NO_WERROR ON)
-set(NO_TESTS ON)
+# These names are libdatachannel's public cache options. Force them before CPM
+# adds the dependency so an older build directory cannot retain its defaults
+# and unexpectedly build example executables.
+set(NO_TESTS ON CACHE BOOL "Disable libdatachannel tests" FORCE)
+set(NO_EXAMPLES ON CACHE BOOL "Disable libdatachannel examples" FORCE)
 add_compile_options(-Wno-error=format)
 
 set(OPENSSL_USE_STATIC_LIBS TRUE)
 set(OPENSSL_MSVC_STATIC_RT TRUE)
 set(BUILD_SHARED_LIBS OFF)
+
+# FindOpenSSL caches absolute library paths. A cache created for native Apple
+# Silicon can otherwise keep /opt/homebrew's arm64 dylibs when the same build
+# tree is reconfigured for an Intel slice.
+if(APPLE AND CMAKE_OSX_ARCHITECTURES MATCHES "(^|;)x86_64(;|$)")
+    foreach(OPENSSL_CACHE_ENTRY
+            OPENSSL_SSL_LIBRARY
+            OPENSSL_CRYPTO_LIBRARY
+            OPENSSL_INCLUDE_DIR)
+        if(DEFINED ${OPENSSL_CACHE_ENTRY}
+           AND "${${OPENSSL_CACHE_ENTRY}}" MATCHES "^/opt/homebrew/")
+            unset(${OPENSSL_CACHE_ENTRY} CACHE)
+        endif()
+    endforeach()
+endif()
 
 # ╭──────────────────────────────────────╮
 # │               pd.cmake               │
@@ -39,7 +58,9 @@ find_package(Boost REQUIRED)
 find_package(PkgConfig QUIET)
 
 option(P2P_GEM_VIDEO "Build the GEM/WebRTC video receiver" ON)
-if(P2P_GEM_VIDEO AND PkgConfig_FOUND)
+option(P2P_BUILD_MAX "Build the Max/MSP + Jitter object family" ON)
+set(MAX_SDK_PATH "" CACHE PATH "Path to the Cycling '74 max-sdk checkout")
+if((P2P_GEM_VIDEO OR P2P_BUILD_MAX) AND PkgConfig_FOUND)
     pkg_check_modules(
         FFMPEG
         QUIET
@@ -60,8 +81,7 @@ cpmaddpackage(
     "BUILD_SHARED_LIBS OFF"
     "BUILD_EXAMPLES OFF"
     "BUILD_TESTING OFF"
-    "CMAKE_OSX_DEPLOYMENT_TARGET=10.15"
-    "CMAKE_OSX_ARCHITECTURES=x86_64;arm64")
+    "CMAKE_OSX_DEPLOYMENT_TARGET=10.15")
 
 # ╭──────────────────────────────────────╮
 # │             Dependências             │
@@ -69,6 +89,16 @@ cpmaddpackage(
 if(MINGW)
     add_compile_options(-Wno-error=format -Wno-error=format-extra-args)
 endif()
+
+# P2PSession uses nlohmann/json directly. Do not rely on libdatachannel's
+# optional examples to create this target as a side effect.
+cpmaddpackage(
+    NAME nlohmann_json
+    GITHUB_REPOSITORY nlohmann/json
+    GIT_TAG v3.11.3
+    OPTIONS
+    "JSON_BuildTests OFF"
+    "JSON_Install OFF")
 
 cpmaddpackage(
     NAME
@@ -80,7 +110,9 @@ cpmaddpackage(
     OPTIONS
     "USE_NICE OFF"
     "USE_SYSTEM_SRTP OFF"
-    "NO_MEDIA OFF")
+    "NO_MEDIA OFF"
+    "NO_EXAMPLES ON"
+    "NO_TESTS ON")
 
 cpmaddpackage(
     NAME
@@ -186,6 +218,144 @@ set_target_properties(opus PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_options(p2p PRIVATE -g)
+endif()
+
+# ╭──────────────────────────────────────╮
+# │              Max/Jitter              │
+# ╰──────────────────────────────────────╯
+if(P2P_BUILD_MAX)
+    if(MAX_SDK_PATH)
+        if(EXISTS "${MAX_SDK_PATH}/c74support/max-includes/ext.h")
+            set(MAX_SDK_BASE_PATH "${MAX_SDK_PATH}")
+        elseif(EXISTS "${MAX_SDK_PATH}/source/c74support/max-includes/ext.h")
+            set(MAX_SDK_BASE_PATH "${MAX_SDK_PATH}/source")
+        else()
+            message(FATAL_ERROR
+                "MAX_SDK_PATH does not contain c74support/max-includes/ext.h: "
+                "${MAX_SDK_PATH}")
+        endif()
+    else()
+        message(STATUS "MAX_SDK_PATH not set; fetching Cycling '74 max-sdk-base")
+        cpmaddpackage(
+            NAME max_sdk_base
+            GITHUB_REPOSITORY Cycling74/max-sdk-base
+            GIT_TAG main
+            DOWNLOAD_ONLY YES)
+        set(MAX_SDK_BASE_PATH "${max_sdk_base_SOURCE_DIR}")
+    endif()
+
+    set(MAX_API_INCLUDES
+        "${MAX_SDK_BASE_PATH}/c74support/max-includes"
+        "${MAX_SDK_BASE_PATH}/c74support/msp-includes"
+        "${MAX_SDK_BASE_PATH}/c74support/jit-includes")
+    if(APPLE)
+        find_library(
+            MAX_AUDIO_API_FRAMEWORK MaxAudioAPI
+            PATHS "${MAX_SDK_BASE_PATH}/c74support/msp-includes"
+            NO_DEFAULT_PATH
+            REQUIRED)
+        find_library(
+            JITTER_API_FRAMEWORK JitterAPI
+            PATHS "${MAX_SDK_BASE_PATH}/c74support/jit-includes"
+            NO_DEFAULT_PATH
+            REQUIRED)
+    endif()
+    message(STATUS "Building Max externals with SDK base: ${MAX_SDK_BASE_PATH}")
+    set(MAX_PACKAGE_DIR "${CMAKE_BINARY_DIR}/p2p-max-package/externals")
+    file(MAKE_DIRECTORY "${MAX_PACKAGE_DIR}")
+    # Remove artifacts produced by the older shared-core layout when an
+    # existing build directory is reconfigured.
+    file(REMOVE
+        "${MAX_PACKAGE_DIR}/libp2p_max_core.dylib"
+        "${MAX_PACKAGE_DIR}/libp2p_max_core.so"
+        "${MAX_PACKAGE_DIR}/p2p_max_core.dll")
+
+    add_library(
+        p2p_max_core STATIC
+        max/p2p/P2PMainThreadDispatch.cpp
+        max/p2p/P2PPeer.cpp
+        max/p2p/P2PSession.cpp
+        max/p2p/P2PSessionRegistry.cpp)
+    target_include_directories(
+        p2p_max_core
+        PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/max/p2p"
+        PRIVATE "${opus_SOURCE_DIR}/include" ${MAX_API_INCLUDES})
+    target_link_libraries(
+        p2p_max_core
+        PUBLIC nlohmann_json::nlohmann_json datachannel-static opus
+        PRIVATE spdlog)
+    set_target_properties(
+        p2p_max_core PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/max-static")
+
+    if(FFMPEG_FOUND)
+        target_compile_definitions(p2p_max_core PUBLIC P2P_JITTER_VIDEO=1)
+        # P2PPeer.hpp exposes FFmpeg frame types when video is enabled, so the
+        # four frontend targets also require FFmpeg's include directories.
+        target_link_libraries(p2p_max_core PUBLIC PkgConfig::FFMPEG)
+        message(STATUS "Max/Jitter H264 video support enabled")
+    else()
+        message(STATUS "Max/Jitter video disabled: FFmpeg development files not found")
+    endif()
+
+    function(p2p_add_max_external target output_name source)
+        string(REPLACE "_" "-" bundle_identifier_suffix "${target}")
+        add_library(${target} MODULE "${source}")
+        target_include_directories(${target} PRIVATE ${MAX_API_INCLUDES})
+        target_link_libraries(${target} PRIVATE p2p_max_core)
+        if(APPLE)
+            # Header-only compilation is not sufficient for Jitter. Linking
+            # these SDK frameworks makes the jit_matrix class available when
+            # Max loads the bundle.
+            target_link_libraries(
+                ${target} PRIVATE
+                "${MAX_AUDIO_API_FRAMEWORK}"
+                "${JITTER_API_FRAMEWORK}")
+        endif()
+        set_target_properties(
+            ${target} PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "${output_name}"
+            LIBRARY_OUTPUT_DIRECTORY "${MAX_PACKAGE_DIR}")
+        if(APPLE)
+            # A Max external is a CFBundle-shaped directory whose executable has
+            # no suffix. CMake's MODULE output is the executable inside it.
+            set_target_properties(
+                ${target} PROPERTIES
+                SUFFIX ""
+                LIBRARY_OUTPUT_DIRECTORY "${MAX_PACKAGE_DIR}/${output_name}.mxo/Contents/MacOS")
+            file(MAKE_DIRECTORY "${MAX_PACKAGE_DIR}/${output_name}.mxo/Contents")
+            file(WRITE "${MAX_PACKAGE_DIR}/${output_name}.mxo/Contents/Info.plist"
+"<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+<plist version=\"1.0\"><dict>
+<key>CFBundleExecutable</key><string>${output_name}</string>
+<key>CFBundleIdentifier</key><string>com.charlesneimog.${bundle_identifier_suffix}</string>
+<key>CFBundlePackageType</key><string>iLaX</string>
+</dict></plist>
+")
+            target_link_options(${target} PRIVATE "-Wl,-undefined,dynamic_lookup")
+            add_custom_command(
+                TARGET ${target}
+                POST_BUILD
+                COMMAND /usr/bin/codesign --force --deep --sign -
+                        "${MAX_PACKAGE_DIR}/${output_name}.mxo"
+                COMMENT "Ad-hoc signing ${output_name}.mxo for Max")
+        elseif(WIN32)
+            set_target_properties(${target} PROPERTIES SUFFIX ".mxe64")
+        else()
+            set_target_properties(${target} PROPERTIES SUFFIX ".mxo")
+        endif()
+    endfunction()
+
+    p2p_add_max_external(p2p_config_max "p2p.config" max/p2p/p2p_config.cpp)
+    p2p_add_max_external(p2p_s_audio_max "p2p.s.audio~" max/p2p/p2p_s_audio.cpp)
+    p2p_add_max_external(p2p_r_audio_max "p2p.r.audio~" max/p2p/p2p_r_audio.cpp)
+    p2p_add_max_external(p2p_r_video_max "p2p.r.video" max/p2p/p2p_r_video.cpp)
+    add_custom_target(
+        p2p_max_package
+        DEPENDS p2p_config_max p2p_s_audio_max p2p_r_audio_max p2p_r_video_max)
 endif()
 
 execute_process(
