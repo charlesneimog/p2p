@@ -10,8 +10,7 @@
 #include <memory>
 #include <string>
 
-namespace {
-t_class *video_class = nullptr;
+static t_class *p2p_r_video_class = nullptr;
 
 struct P2PRVideo {
     t_object object;
@@ -28,7 +27,7 @@ struct P2PRVideo {
     bool ambiguity_reported;
 };
 
-void detach(P2PRVideo *x) {
+static void p2p_r_video_detach(P2PRVideo *x) {
     auto session = std::atomic_load(x->session);
     if (session && x->registered) {
         session->unregisterVideoReceiver();
@@ -37,7 +36,7 @@ void detach(P2PRVideo *x) {
     std::atomic_store(x->session, std::shared_ptr<P2PSession>());
 }
 
-void attach(P2PRVideo *x) {
+static void p2p_r_video_attach(P2PRVideo *x) {
     if (x->session_id->empty() || x->registered) {
         return;
     }
@@ -50,12 +49,12 @@ void attach(P2PRVideo *x) {
     std::atomic_store(x->session, std::move(session));
 }
 
-void poll(P2PRVideo *x) {
+static void p2p_r_video_poll(P2PRVideo *x) {
     if (!x->session_id->empty() && !x->username->empty()) {
         auto current = std::atomic_load(x->session);
         auto found = P2PSessionRegistry::find(*x->session_id);
         if (found != current) {
-            detach(x);
+            p2p_r_video_detach(x);
             if (found) {
                 found->registerVideoReceiver();
                 x->registered = true;
@@ -81,7 +80,7 @@ void poll(P2PRVideo *x) {
     clock_delay(x->poll_clock, 100);
 }
 
-void outputMatrix(P2PRVideo *x) {
+static void p2p_r_video_output_matrix(P2PRVideo *x) {
 #ifndef P2P_JITTER_VIDEO
     object_error((t_object *)x, "video support was not compiled");
 #else
@@ -140,8 +139,8 @@ void outputMatrix(P2PRVideo *x) {
 #endif
 }
 
-void *videoNew(t_symbol *, long argc, t_atom *argv) {
-    auto *x = reinterpret_cast<P2PRVideo *>(object_alloc(video_class));
+static void *p2p_r_video_new(t_symbol *, long argc, t_atom *argv) {
+    auto *x = reinterpret_cast<P2PRVideo *>(object_alloc(p2p_r_video_class));
     x->session_id = new std::string();
     x->username = new std::string();
     x->session = new std::shared_ptr<P2PSession>();
@@ -162,22 +161,22 @@ void *videoNew(t_symbol *, long argc, t_atom *argv) {
     } else {
         object_error((t_object *)x, "could not create Jitter output matrix");
     }
-    x->poll_clock = clock_new(x, reinterpret_cast<method>(poll));
+    x->poll_clock = clock_new(x, reinterpret_cast<method>(p2p_r_video_poll));
     if (argc < 2 || atom_gettype(argv) != A_SYM || atom_gettype(argv + 1) != A_SYM) {
         object_error((t_object *)x, "expected session ID and username");
     } else {
         *x->session_id = atom_getsym(argv)->s_name;
         *x->username = atom_getsym(argv + 1)->s_name;
-        attach(x);
+        p2p_r_video_attach(x);
     }
     clock_delay(x->poll_clock, 0);
     return x;
 }
 
-void videoFree(P2PRVideo *x) {
+static void p2p_r_video_free(P2PRVideo *x) {
     clock_unset(x->poll_clock);
     object_free(x->poll_clock);
-    detach(x);
+    p2p_r_video_detach(x);
     if (x->matrix) {
         jit_object_free(x->matrix);
     }
@@ -185,14 +184,13 @@ void videoFree(P2PRVideo *x) {
     delete x->username;
     delete x->session_id;
 }
-} // namespace
 
 void p2p_r_video_setup() {
-    video_class =
-        class_new("p2p.r.video", reinterpret_cast<method>(videoNew),
-                  reinterpret_cast<method>(videoFree), sizeof(P2PRVideo), nullptr, A_GIMME, 0);
-    class_addmethod(video_class, reinterpret_cast<method>(outputMatrix), "bang", 0);
-    class_register(CLASS_BOX, video_class);
+    p2p_r_video_class =
+        class_new("p2p.r.video", reinterpret_cast<method>(p2p_r_video_new),
+                  reinterpret_cast<method>(p2p_r_video_free), sizeof(P2PRVideo), nullptr, A_GIMME, 0);
+    class_addmethod(p2p_r_video_class, reinterpret_cast<method>(p2p_r_video_output_matrix), "bang", 0);
+    class_register(CLASS_BOX, p2p_r_video_class);
 }
 
 extern "C" C74_EXPORT void ext_main(void *) {

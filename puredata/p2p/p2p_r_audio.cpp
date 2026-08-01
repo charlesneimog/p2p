@@ -11,8 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace {
-t_class *p2p_r_audio_class = nullptr;
+static t_class *p2p_r_audio_class = nullptr;
 
 struct P2PRAudio {
     t_object object;
@@ -30,7 +29,7 @@ struct P2PRAudio {
     bool ambiguity_reported;
 };
 
-void receiverStorePeer(P2PRAudio *object, std::shared_ptr<P2PPeer> peer) {
+static void p2p_r_audio_store_peer(P2PRAudio *object, std::shared_ptr<P2PPeer> peer) {
     auto old_peer = std::atomic_load(object->peer);
     if (old_peer == peer) {
         return;
@@ -44,22 +43,22 @@ void receiverStorePeer(P2PRAudio *object, std::shared_ptr<P2PPeer> peer) {
     object->realtime_peer->store(current.get(), std::memory_order_release);
 }
 
-void receiverDetach(P2PRAudio *object) {
+static void p2p_r_audio_detach(P2PRAudio *object) {
     auto session = std::atomic_load(object->session);
     if (session && object->claimed) {
         session->releaseAudioReceiver(*object->username, object);
     }
     object->claimed = false;
-    receiverStorePeer(object, {});
+    p2p_r_audio_store_peer(object, {});
     std::atomic_store(object->session, std::shared_ptr<P2PSession>());
 }
 
-void receiverPoll(P2PRAudio *object) {
+static void p2p_r_audio_poll(P2PRAudio *object) {
     if (!object->session_id->empty() && !object->username->empty()) {
         auto current = std::atomic_load(object->session);
         auto found = P2PSessionRegistry::find(*object->session_id);
         if (found != current) {
-            receiverDetach(object);
+            p2p_r_audio_detach(object);
             if (found) {
                 std::atomic_store(object->session, found);
             }
@@ -68,16 +67,16 @@ void receiverPoll(P2PRAudio *object) {
             object->claimed = found->claimAudioReceiver(*object->username, object);
             if (!object->claimed && !object->duplicate_consumer_reported) {
                 object->duplicate_consumer_reported = true;
-                pd_error(object,
-                         "[p2p.r.audio~] another receiver already consumes this user");
+                pd_error(object, "[p2p.r.audio~] another receiver already consumes this user");
             }
         }
         if (!found) {
-            receiverStorePeer(object, {});
+            p2p_r_audio_store_peer(object, {});
             if (!object->missing_reported) {
                 object->missing_reported = true;
-                pd_error(object, "[p2p.r.audio~] no active [p2p.config] for session '%s'; "
-                                 "waiting",
+                pd_error(object,
+                         "[p2p.r.audio~] no active [p2p.config] for session '%s'; "
+                         "waiting",
                          object->session_id->c_str());
             }
         } else {
@@ -85,7 +84,7 @@ void receiverPoll(P2PRAudio *object) {
             const auto resolution =
                 object->claimed ? found->resolvePeer(*object->username) : P2PPeerResolution{};
             if (resolution.ambiguous) {
-                receiverStorePeer(object, {});
+                p2p_r_audio_store_peer(object, {});
                 if (!object->ambiguity_reported) {
                     object->ambiguity_reported = true;
                     pd_error(object, "[p2p.r.audio~] duplicate username is ambiguous: '%s'",
@@ -93,14 +92,14 @@ void receiverPoll(P2PRAudio *object) {
                 }
             } else {
                 object->ambiguity_reported = false;
-                receiverStorePeer(object, resolution.peer);
+                p2p_r_audio_store_peer(object, resolution.peer);
             }
         }
     }
     clock_delay(object->attach_clock, 50);
 }
 
-t_int *receiverPerform(t_int *words) {
+static t_int *p2p_r_audio_perform(t_int *words) {
     auto *object = reinterpret_cast<P2PRAudio *>(words[1]);
     auto *output = reinterpret_cast<t_sample *>(words[2]);
     const int count = static_cast<int>(words[3]);
@@ -117,11 +116,11 @@ t_int *receiverPerform(t_int *words) {
     return words + 4;
 }
 
-void receiverDsp(P2PRAudio *object, t_signal **signals) {
-    dsp_add(receiverPerform, 3, object, signals[0]->s_vec, signals[0]->s_n);
+static void p2p_r_audio_dsp(P2PRAudio *object, t_signal **signals) {
+    dsp_add(p2p_r_audio_perform, 3, object, signals[0]->s_vec, signals[0]->s_n);
 }
 
-void *receiverNew(t_symbol *, int argc, t_atom *argv) {
+static void *p2p_r_audio_new(t_symbol *, int argc, t_atom *argv) {
     auto *object = reinterpret_cast<P2PRAudio *>(pd_new(p2p_r_audio_class));
     object->session_id = new std::string();
     object->username = new std::string();
@@ -134,7 +133,7 @@ void *receiverNew(t_symbol *, int argc, t_atom *argv) {
     object->duplicate_consumer_reported = false;
     object->ambiguity_reported = false;
     object->signal_outlet = outlet_new(&object->object, &s_signal);
-    object->attach_clock = clock_new(object, reinterpret_cast<t_method>(receiverPoll));
+    object->attach_clock = clock_new(object, reinterpret_cast<t_method>(p2p_r_audio_poll));
     if (argc < 2 || argv[0].a_type != A_SYMBOL || argv[1].a_type != A_SYMBOL ||
         !atom_getsymbol(argv)->s_name[0] || !atom_getsymbol(argv + 1)->s_name[0]) {
         pd_error(object, "[p2p.r.audio~] expected session ID and username");
@@ -146,10 +145,10 @@ void *receiverNew(t_symbol *, int argc, t_atom *argv) {
     return object;
 }
 
-void receiverFree(P2PRAudio *object) {
+static void p2p_r_audio_free(P2PRAudio *object) {
     clock_unset(object->attach_clock);
     clock_free(object->attach_clock);
-    receiverDetach(object);
+    p2p_r_audio_detach(object);
     delete object->realtime_peer;
     delete object->retired_peers;
     delete object->peer;
@@ -157,13 +156,11 @@ void receiverFree(P2PRAudio *object) {
     delete object->username;
     delete object->session_id;
 }
-} // namespace
 
 void p2p_r_audio_setup() {
-    p2p_r_audio_class =
-        class_new(gensym("p2p.r.audio~"), reinterpret_cast<t_newmethod>(receiverNew),
-                  reinterpret_cast<t_method>(receiverFree), sizeof(P2PRAudio), CLASS_DEFAULT,
-                  A_GIMME, 0);
-    class_addmethod(p2p_r_audio_class, reinterpret_cast<t_method>(receiverDsp), gensym("dsp"),
+    p2p_r_audio_class = class_new(
+        gensym("p2p.r.audio~"), reinterpret_cast<t_newmethod>(p2p_r_audio_new),
+        reinterpret_cast<t_method>(p2p_r_audio_free), sizeof(P2PRAudio), CLASS_DEFAULT, A_GIMME, 0);
+    class_addmethod(p2p_r_audio_class, reinterpret_cast<t_method>(p2p_r_audio_dsp), gensym("dsp"),
                     A_CANT, 0);
 }

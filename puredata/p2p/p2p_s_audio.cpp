@@ -12,6 +12,7 @@
 
 t_class *p2p_s_audio_class = nullptr;
 
+// ─────────────────────────────────────
 struct P2PSAudio {
     t_object object;
     t_sample signal;

@@ -3,6 +3,7 @@
 
 #include <m_pd.h>
 
+// ─────────────────────────────────────
 extern "C" void p2p_setup() {
     post("[p2p] by Charles K. Neimog %d.%d.%d", 0, 2, 0);
     P2PMainThreadDispatch::initialize();

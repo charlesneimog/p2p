@@ -11,7 +11,7 @@
 #include <memory>
 #include <string>
 
-t_class *p2p_config_class = nullptr;
+static t_class *p2p_config_class = nullptr;
 
 struct ConfigLifetime {
     std::atomic<bool> active{true};

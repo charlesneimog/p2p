@@ -5,11 +5,11 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace {
+// GLOBAL
 std::mutex registry_mutex;
 std::unordered_map<std::string, std::weak_ptr<P2PSession>> sessions;
-}
 
+// ─────────────────────────────────────
 std::shared_ptr<P2PSession> P2PSessionRegistry::acquire(const std::string &id) {
     std::lock_guard<std::mutex> lock(registry_mutex);
     auto &entry = sessions[id];
@@ -21,6 +21,7 @@ std::shared_ptr<P2PSession> P2PSessionRegistry::acquire(const std::string &id) {
     return session;
 }
 
+// ─────────────────────────────────────
 std::shared_ptr<P2PSession> P2PSessionRegistry::find(const std::string &id) {
     std::lock_guard<std::mutex> lock(registry_mutex);
     auto iterator = sessions.find(id);
@@ -34,11 +35,13 @@ std::shared_ptr<P2PSession> P2PSessionRegistry::find(const std::string &id) {
     return session;
 }
 
+// ─────────────────────────────────────
 void P2PSessionRegistry::release(const std::string &id) {
     std::lock_guard<std::mutex> lock(registry_mutex);
     sessions.erase(id);
 }
 
+// ─────────────────────────────────────
 void P2PSessionRegistry::release(const std::string &id,
                                  const std::shared_ptr<P2PSession> &session) {
     std::lock_guard<std::mutex> lock(registry_mutex);

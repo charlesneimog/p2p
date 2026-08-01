@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-t_class *p2p_s_audio_class = nullptr;
+static t_class *p2p_s_audio_class = nullptr;
 
 struct P2PSAudio {
     t_pxobject object;

@@ -3,13 +3,17 @@
 #include "P2PSession.hpp"
 
 #include <chrono>
+
+// ─────────────────────────────────────
 P2PPeer::P2PPeer(std::string id, std::string name)
     : peer_id(std::move(id)), username(std::move(name)) {}
 
+// ─────────────────────────────────────
 P2PPeer::~P2PPeer() {
     shutdown();
 }
 
+// ─────────────────────────────────────
 void P2PPeer::startTransmission(const std::weak_ptr<P2PSession> &weak_session) {
     thread_running_ = true;
     std::weak_ptr<P2PPeer> weak_peer = shared_from_this();
@@ -56,10 +60,12 @@ void P2PPeer::startTransmission(const std::weak_ptr<P2PSession> &weak_session) {
     });
 }
 
+// ─────────────────────────────────────
 bool P2PPeer::popReceived(float &sample) {
     return receive_buffer.pop(sample);
 }
 
+// ─────────────────────────────────────
 void P2PPeer::shutdown() {
     {
         std::lock_guard<std::mutex> lock(shutdown_mutex_);

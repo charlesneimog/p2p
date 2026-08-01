@@ -20,9 +20,9 @@ Use [https://charlesneimog.github.io/p2p/](https://charlesneimog.github.io/p2p/)
 
 ## Compile
 
-Requirements are CMake 3.30 or newer, a C/C++ compiler, Boost, Make, and the
-Pure Data development headers. Dependencies, including a minimal static
-FFmpeg build for video support, are downloaded automatically.
+Requirements are CMake 3.30 or newer, a C/C++ compiler, Boost, and the Pure
+Data development headers. Dependencies, including a static FFmpeg 7 build
+with H.264 support, are downloaded automatically.
 
 For Pure Data only:
 
@@ -34,11 +34,13 @@ cmake --build build --config Release
 For Max/MSP only:
 
 ```sh
-cmake -S . -B build-max -DP2P_BUILD_MAX=ON -DP2P_GEM_VIDEO=OFF
+cmake -S . -B build-max -DP2P_BUILD_MAX=ON
 cmake --build build-max --target p2p_max_package --config Release
 ```
 
-If `MAX_SDK_PATH` is not set, CMake downloads Cycling '74's `max-sdk-base`.
+If `MAX_SDK_PATH` is not set, CMake downloads Cycling '74's `max-sdk` v8.2.0.
+The path may point to either a full `max-sdk` checkout or directly to its
+`max-sdk-base` directory.
 The Max externals are written to `build-max/p2p-max-package/externals`.
 
 ## Examples

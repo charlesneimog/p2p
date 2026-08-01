@@ -15,7 +15,7 @@
 #include "Gem/State.h"
 #endif
 
-t_class *p2p_r_video_class = nullptr;
+static t_class *p2p_r_video_class = nullptr;
 
 struct P2PRVideo {
     t_object object;
@@ -34,7 +34,7 @@ struct P2PRVideo {
 };
 
 // ─────────────────────────────────────
-void videoDetach(P2PRVideo *object) {
+static void p2p_r_video_detach(P2PRVideo *object) {
     auto session = std::atomic_load(object->session);
     if (session && object->registered) {
         session->unregisterVideoReceiver();
@@ -44,12 +44,12 @@ void videoDetach(P2PRVideo *object) {
 }
 
 // ─────────────────────────────────────
-void videoPoll(P2PRVideo *object) {
+static void p2p_r_video_poll(P2PRVideo *object) {
     if (!object->session_id->empty() && !object->username->empty()) {
         auto current = std::atomic_load(object->session);
         auto found = P2PSessionRegistry::find(*object->session_id);
         if (found != current) {
-            videoDetach(object);
+            p2p_r_video_detach(object);
             if (found) {
                 found->registerVideoReceiver();
                 object->registered = true;
@@ -76,7 +76,7 @@ void videoPoll(P2PRVideo *object) {
 }
 
 // ─────────────────────────────────────
-void videoGemState(P2PRVideo *object, t_symbol *, int argc, t_atom *argv) {
+static void p2p_r_video_gem_state(P2PRVideo *object, t_symbol *, int argc, t_atom *argv) {
 #ifndef P2P_GEM_VIDEO
     outlet_anything(object->gem_outlet, gensym("gem_state"), argc, argv);
 #else
@@ -122,7 +122,7 @@ void videoGemState(P2PRVideo *object, t_symbol *, int argc, t_atom *argv) {
 }
 
 // ─────────────────────────────────────
-void *videoNew(t_symbol *, int argc, t_atom *argv) {
+static void *p2p_r_video_new(t_symbol *, int argc, t_atom *argv) {
     auto *object = reinterpret_cast<P2PRVideo *>(pd_new(p2p_r_video_class));
     object->session_id = new std::string();
     object->username = new std::string();
@@ -131,7 +131,7 @@ void *videoNew(t_symbol *, int argc, t_atom *argv) {
     object->missing_reported = false;
     object->ambiguity_reported = false;
     object->gem_outlet = outlet_new(&object->object, gensym("gem_state"));
-    object->attach_clock = clock_new(object, reinterpret_cast<t_method>(videoPoll));
+    object->attach_clock = clock_new(object, reinterpret_cast<t_method>(p2p_r_video_poll));
 #ifdef P2P_GEM_VIDEO
     object->pixels = new pixBlock();
     object->serial = 0;
@@ -150,10 +150,10 @@ void *videoNew(t_symbol *, int argc, t_atom *argv) {
 }
 
 // ─────────────────────────────────────
-void videoFree(P2PRVideo *object) {
+static void p2p_r_video_free(P2PRVideo *object) {
     clock_unset(object->attach_clock);
     clock_free(object->attach_clock);
-    videoDetach(object);
+    p2p_r_video_detach(object);
 #ifdef P2P_GEM_VIDEO
     delete object->pixels;
 #endif
@@ -164,9 +164,9 @@ void videoFree(P2PRVideo *object) {
 
 // ─────────────────────────────────────
 void p2p_r_video_setup() {
-    p2p_r_video_class = class_new(gensym("p2p.r.video"), reinterpret_cast<t_newmethod>(videoNew),
-                                  reinterpret_cast<t_method>(videoFree), sizeof(P2PRVideo),
+    p2p_r_video_class = class_new(gensym("p2p.r.video"), reinterpret_cast<t_newmethod>(p2p_r_video_new),
+                                  reinterpret_cast<t_method>(p2p_r_video_free), sizeof(P2PRVideo),
                                   CLASS_DEFAULT, A_GIMME, 0);
-    class_addmethod(p2p_r_video_class, reinterpret_cast<t_method>(videoGemState),
+    class_addmethod(p2p_r_video_class, reinterpret_cast<t_method>(p2p_r_video_gem_state),
                     gensym("gem_state"), A_GIMME, 0);
 }
