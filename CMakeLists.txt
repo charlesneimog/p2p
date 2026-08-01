@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.30)
-project(p2p~ LANGUAGES CXX C)
+project(p2p LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -157,10 +157,10 @@ set(P2P_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/p2p_r_video.cpp")
 
 pd_add_external(p2p "${P2P_SOURCES}")
-pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p-test.pd")
-pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p-smoke.pd")
-pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p-tls-smoke.pd")
-pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/TESTING.md")
+pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/p2p-help.pd")
+pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/puredata")
+pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 target_include_directories(p2p PRIVATE "${opus_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p")
 target_link_libraries(
@@ -173,8 +173,8 @@ target_link_libraries(
 
 target_compile_definitions(p2p PRIVATE P2P_GEM_VIDEO=1)
 target_include_directories(p2p PRIVATE "${GEM_GENERATED_INCLUDE_DIR}" "${Gem_SOURCE_DIR}/src")
-# Pd does not guarantee that symbols from the separately loaded Gem external are globally visible. Compile the image
-# ABI used by pixBlock into p2p~ so loading does not depend on Gem's dlopen visibility or load order.
+# Pd does not guarantee that symbols from the separately loaded Gem external are globally visible. Compile the image ABI
+# used by pixBlock into p2p~ so loading does not depend on Gem's dlopen visibility or load order.
 target_sources(
     p2p
     PRIVATE "${Gem_SOURCE_DIR}/src/Gem/Image.cpp"
