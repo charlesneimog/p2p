@@ -13,7 +13,6 @@
 #include <string>
 #include <vector>
 
-namespace {
 t_class *p2p_s_audio_class = nullptr;
 
 struct P2PSAudio {
@@ -28,7 +27,7 @@ struct P2PSAudio {
     bool duplicate_reported;
 };
 
-void senderDetach(P2PSAudio *object) {
+static void p2p_s_audio_detach(P2PSAudio *object) {
     auto session = std::atomic_load(object->session);
     if (session && object->claimed) {
         session->releaseAudioSender(object);
@@ -41,12 +40,12 @@ void senderDetach(P2PSAudio *object) {
     std::atomic_store(object->session, std::shared_ptr<P2PSession>());
 }
 
-void senderPoll(P2PSAudio *object) {
+static void p2p_s_audio_poll(P2PSAudio *object) {
     if (!object->session_id->empty()) {
         auto current = std::atomic_load(object->session);
         auto found = P2PSessionRegistry::find(*object->session_id);
         if (found != current) {
-            senderDetach(object);
+            p2p_s_audio_detach(object);
             current.reset();
         }
         if (found && !object->claimed) {
@@ -73,8 +72,8 @@ void senderPoll(P2PSAudio *object) {
     clock_delay(object->attach_clock, 100);
 }
 
-void senderPerform64(P2PSAudio *object, t_object *, double **inputs, long,
-                     double **, long, long count, long, void *) {
+static void p2p_s_audio_perform64(P2PSAudio *object, t_object *, double **inputs, long,
+                                  double **, long, long count, long, void *) {
     auto *session = object->realtime_session->load(std::memory_order_acquire);
     if (session && session->available()) {
         constexpr long block = 2048;
@@ -87,11 +86,11 @@ void senderPerform64(P2PSAudio *object, t_object *, double **inputs, long,
     }
 }
 
-void senderDsp64(P2PSAudio *object, t_object *dsp64, short *, double, long, long) {
-    object_method(dsp64, gensym("dsp_add64"), object, senderPerform64, 0, nullptr);
+static void p2p_s_audio_dsp64(P2PSAudio *object, t_object *dsp64, short *, double, long, long) {
+    object_method(dsp64, gensym("dsp_add64"), object, p2p_s_audio_perform64, 0, nullptr);
 }
 
-void *senderNew(t_symbol *, long argc, t_atom *argv) {
+static void *p2p_s_audio_new(t_symbol *, long argc, t_atom *argv) {
     auto *object = reinterpret_cast<P2PSAudio *>(object_alloc(p2p_s_audio_class));
     dsp_setup(&object->object, 1);
     object->session_id = new std::string();
@@ -101,7 +100,7 @@ void *senderNew(t_symbol *, long argc, t_atom *argv) {
     object->claimed = false;
     object->missing_reported = false;
     object->duplicate_reported = false;
-    object->attach_clock = clock_new(object, reinterpret_cast<method>(senderPoll));
+    object->attach_clock = clock_new(object, reinterpret_cast<method>(p2p_s_audio_poll));
     if (argc < 1 || atom_gettype(argv + 0) != A_SYM ||
         !atom_getsym(argv)->s_name[0]) {
         object_error((t_object *)object, "[p2p.s.audio~] missing session ID");
@@ -112,24 +111,23 @@ void *senderNew(t_symbol *, long argc, t_atom *argv) {
     return object;
 }
 
-void senderFree(P2PSAudio *object) {
+static void p2p_s_audio_free(P2PSAudio *object) {
     clock_unset(object->attach_clock);
     object_free(object->attach_clock);
-    senderDetach(object);
+    p2p_s_audio_detach(object);
     dsp_free(&object->object);
     delete object->realtime_session;
     delete object->retired_sessions;
     delete object->session;
     delete object->session_id;
 }
-} // namespace
 
 void p2p_s_audio_setup() {
     p2p_s_audio_class =
-        class_new("p2p.s.audio~", reinterpret_cast<method>(senderNew),
-                  reinterpret_cast<method>(senderFree), sizeof(P2PSAudio), nullptr,
+        class_new("p2p.s.audio~", reinterpret_cast<method>(p2p_s_audio_new),
+                  reinterpret_cast<method>(p2p_s_audio_free), sizeof(P2PSAudio), nullptr,
                   A_GIMME, 0);
-    class_addmethod(p2p_s_audio_class, reinterpret_cast<method>(senderDsp64), "dsp64",
+    class_addmethod(p2p_s_audio_class, reinterpret_cast<method>(p2p_s_audio_dsp64), "dsp64",
                     A_CANT, 0);
     class_dspinit(p2p_s_audio_class);
     class_register(CLASS_BOX, p2p_s_audio_class);

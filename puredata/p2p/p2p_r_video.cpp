@@ -15,7 +15,6 @@
 #include "Gem/State.h"
 #endif
 
-namespace {
 t_class *p2p_r_video_class = nullptr;
 
 struct P2PRVideo {
@@ -34,6 +33,7 @@ struct P2PRVideo {
 #endif
 };
 
+// ─────────────────────────────────────
 void videoDetach(P2PRVideo *object) {
     auto session = std::atomic_load(object->session);
     if (session && object->registered) {
@@ -43,6 +43,7 @@ void videoDetach(P2PRVideo *object) {
     std::atomic_store(object->session, std::shared_ptr<P2PSession>());
 }
 
+// ─────────────────────────────────────
 void videoPoll(P2PRVideo *object) {
     if (!object->session_id->empty() && !object->username->empty()) {
         auto current = std::atomic_load(object->session);
@@ -67,14 +68,14 @@ void videoPoll(P2PRVideo *object) {
             }
         } else if (!object->missing_reported) {
             object->missing_reported = true;
-            pd_error(object,
-                     "[p2p.r.video] no active [p2p.config] for session '%s'; waiting",
+            pd_error(object, "[p2p.r.video] no active [p2p.config] for session '%s'; waiting",
                      object->session_id->c_str());
         }
     }
     clock_delay(object->attach_clock, 100);
 }
 
+// ─────────────────────────────────────
 void videoGemState(P2PRVideo *object, t_symbol *, int argc, t_atom *argv) {
 #ifndef P2P_GEM_VIDEO
     outlet_anything(object->gem_outlet, gensym("gem_state"), argc, argv);
@@ -120,6 +121,7 @@ void videoGemState(P2PRVideo *object, t_symbol *, int argc, t_atom *argv) {
 #endif
 }
 
+// ─────────────────────────────────────
 void *videoNew(t_symbol *, int argc, t_atom *argv) {
     auto *object = reinterpret_cast<P2PRVideo *>(pd_new(p2p_r_video_class));
     object->session_id = new std::string();
@@ -147,6 +149,7 @@ void *videoNew(t_symbol *, int argc, t_atom *argv) {
     return object;
 }
 
+// ─────────────────────────────────────
 void videoFree(P2PRVideo *object) {
     clock_unset(object->attach_clock);
     clock_free(object->attach_clock);
@@ -158,13 +161,12 @@ void videoFree(P2PRVideo *object) {
     delete object->username;
     delete object->session_id;
 }
-} // namespace
 
+// ─────────────────────────────────────
 void p2p_r_video_setup() {
-    p2p_r_video_class =
-        class_new(gensym("p2p.r.video"), reinterpret_cast<t_newmethod>(videoNew),
-                  reinterpret_cast<t_method>(videoFree), sizeof(P2PRVideo), CLASS_DEFAULT,
-                  A_GIMME, 0);
+    p2p_r_video_class = class_new(gensym("p2p.r.video"), reinterpret_cast<t_newmethod>(videoNew),
+                                  reinterpret_cast<t_method>(videoFree), sizeof(P2PRVideo),
+                                  CLASS_DEFAULT, A_GIMME, 0);
     class_addmethod(p2p_r_video_class, reinterpret_cast<t_method>(videoGemState),
                     gensym("gem_state"), A_GIMME, 0);
 }
