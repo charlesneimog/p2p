@@ -9,8 +9,8 @@ on:
                 type: boolean
                 default: false
 env:
-    LIBNAME: p2p~
-    LIBVERSION: "0.1.1"
+    LIBNAME: p2p
+    LIBVERSION: "0.1.0"
 permissions:
     contents: write
 jobs:
@@ -58,6 +58,7 @@ jobs:
                   sudo apt update
                   sudo add-apt-repository ppa:pure-data/pure-data -y
                   sudo apt install libboost-all-dev puredata -y
+                  sudo apt install libx11-dev
             - name: Install aarch64 gcc
               if: matrix.arch == 'aarch64'
               run: |
