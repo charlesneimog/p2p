@@ -6,6 +6,7 @@
 
 #include <ext.h>
 #include <ext_obex.h>
+#include <z_dsp.h>
 
 #include <atomic>
 #include <memory>
@@ -136,6 +137,19 @@ static void p2p_config_free(P2PConfig *object) {
 static void p2p_config_connect(P2PConfig *object, t_symbol *url, t_symbol *room,
                                t_symbol *username) {
     if (object->session && *object->session && object->controls_session) {
+        const int current_sample_rate = static_cast<int>(sys_getsr());
+        const int session_sample_rate = (*object->session)->sampleRate();
+        if (current_sample_rate != 48000 || session_sample_rate != 48000) {
+            object_error(
+                (t_object *)object,
+                "[p2p.config] connection refused: Max/MSP must be running at 48000 Hz "
+                "(current: %d Hz, session: %d Hz)",
+                current_sample_rate, session_sample_rate);
+            t_atom atom;
+            atom_setsym(&atom, gensym("sample rate must be 48000 Hz"));
+            outlet_anything(object->outlet, gensym("error"), 1, &atom);
+            return;
+        }
         (*object->session)->connect(url->s_name, room->s_name, username->s_name);
     }
 }

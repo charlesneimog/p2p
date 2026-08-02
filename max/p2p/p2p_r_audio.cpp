@@ -24,6 +24,9 @@ struct P2PRAudio {
     std::shared_ptr<P2PPeer> *peer;
     std::vector<std::shared_ptr<P2PPeer>> *retired_peers;
     std::atomic<P2PPeer *> *realtime_peer;
+    P2PPeer *rendering_peer;
+    double last_output;
+    long recovery_samples;
     t_clock *attach_clock;
     void *signal_outlet;
     bool claimed;
@@ -107,13 +110,37 @@ static void p2p_r_audio_perform64(P2PRAudio *object, t_object *, double **, long
     auto *output = outputs[0];
     auto *peer = object->realtime_peer->load(std::memory_order_acquire);
     if (!peer || !peer->active || !peer->connected) {
+        object->rendering_peer = nullptr;
+        object->last_output = 0.0;
+        object->recovery_samples = 0;
         std::fill(output, output + count, 0.0);
         return;
     }
+    if (peer != object->rendering_peer) {
+        object->rendering_peer = peer;
+        object->last_output = 0.0;
+        object->recovery_samples = 0;
+    }
     for (int index = 0; index < count; ++index) {
         float sample = 0;
-        peer->popReceived(sample);
-        output[index] = sample;
+        if (!peer->popReceived(sample)) {
+            // Do not turn a sub-vector network underrun into an instantaneous
+            // jump to zero. This concealment consumes no future samples and
+            // therefore adds no latency; it only smooths samples that are
+            // already missing.
+            object->last_output *= 0.995;
+            object->recovery_samples = 16;
+            output[index] = object->last_output;
+            continue;
+        }
+        if (object->recovery_samples > 0) {
+            const double mix = static_cast<double>(17 - object->recovery_samples) / 16.0;
+            object->last_output += (static_cast<double>(sample) - object->last_output) * mix;
+            --object->recovery_samples;
+        } else {
+            object->last_output = sample;
+        }
+        output[index] = object->last_output;
     }
 }
 
@@ -130,6 +157,9 @@ static void *p2p_r_audio_new(t_symbol *, long argc, t_atom *argv) {
     object->peer = new std::shared_ptr<P2PPeer>();
     object->retired_peers = new std::vector<std::shared_ptr<P2PPeer>>();
     object->realtime_peer = new std::atomic<P2PPeer *>(nullptr);
+    object->rendering_peer = nullptr;
+    object->last_output = 0.0;
+    object->recovery_samples = 0;
     object->claimed = false;
     object->missing_reported = false;
     object->duplicate_consumer_reported = false;
