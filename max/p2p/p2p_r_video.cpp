@@ -10,6 +10,12 @@
 #include <memory>
 #include <string>
 
+#ifdef P2P_JITTER_VIDEO
+extern "C" {
+#include <libavutil/pixdesc.h>
+}
+#endif
+
 static t_class *p2p_r_video_class = nullptr;
 
 struct P2PRVideo {
@@ -18,7 +24,8 @@ struct P2PRVideo {
     std::string *username;
     std::shared_ptr<P2PSession> *session;
     t_clock *poll_clock;
-    void *outlet;
+    void *matrix_outlet;
+    void *info_outlet;
     void *matrix;
     t_symbol *matrix_name;
     uint64_t serial;
@@ -26,6 +33,22 @@ struct P2PRVideo {
     bool missing_reported;
     bool ambiguity_reported;
 };
+
+#ifdef P2P_JITTER_VIDEO
+static void p2p_r_video_output_info(P2PRVideo *x, long width, long height,
+                                    const char *codec, const char *pixel_format) {
+    t_atom resolution[2];
+    atom_setlong(resolution, width);
+    atom_setlong(resolution + 1, height);
+    outlet_anything(x->info_outlet, gensym("resolution"), 2, resolution);
+
+    t_atom value;
+    atom_setsym(&value, gensym(codec ? codec : "unknown"));
+    outlet_anything(x->info_outlet, gensym("codec"), 1, &value);
+    atom_setsym(&value, gensym(pixel_format ? pixel_format : "unknown"));
+    outlet_anything(x->info_outlet, gensym("pixel_format"), 1, &value);
+}
+#endif
 
 static void p2p_r_video_detach(P2PRVideo *x) {
     auto session = std::atomic_load(x->session);
@@ -94,48 +117,66 @@ static void p2p_r_video_output_matrix(P2PRVideo *x) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(peer->video_mutex);
-    if (!peer->video_serial || !peer->rgba_frame || peer->rgba_frame->width <= 0 ||
-        peer->rgba_pixels.empty()) {
-        return;
-    }
-
-    t_jit_matrix_info info{};
-    info.type = _jit_sym_char;
-    info.planecount = 4;
-    info.dimcount = 2;
-    info.dim[0] = peer->rgba_frame->width;
-    info.dim[1] = peer->rgba_frame->height;
-    jit_object_method(x->matrix, _jit_sym_setinfo, &info);
-
-    char *data = nullptr;
-    jit_object_method(x->matrix, _jit_sym_getdata, &data);
-    jit_object_method(x->matrix, _jit_sym_getinfo, &info);
-    if (!data) {
-        return;
-    }
-
-    const size_t width = static_cast<size_t>(peer->rgba_frame->width);
-    const size_t source_row_bytes = width * 4;
-    for (long row = 0; row < info.dim[1]; ++row) {
-        const auto *source = peer->rgba_pixels.data() + static_cast<size_t>(row) * source_row_bytes;
-        auto *destination =
-            reinterpret_cast<unsigned char *>(data + static_cast<size_t>(row) * info.dimstride[1]);
-        for (size_t column = 0; column < width; ++column) {
-            const auto *rgba = source + column * 4;
-            auto *argb = destination + column * info.dimstride[0];
-            // FFmpeg produces RGBA, but a four-plane Jitter char matrix uses
-            // ARGB plane order.
-            argb[0] = rgba[3];
-            argb[1] = rgba[0];
-            argb[2] = rgba[1];
-            argb[3] = rgba[2];
+    long width = 0;
+    long height = 0;
+    std::string codec;
+    std::string pixel_format;
+    {
+        std::lock_guard<std::mutex> lock(peer->video_mutex);
+        if (!peer->video_serial || !peer->rgba_frame || peer->rgba_frame->width <= 0 ||
+            peer->rgba_pixels.empty()) {
+            return;
         }
+
+        width = peer->rgba_frame->width;
+        height = peer->rgba_frame->height;
+        codec = peer->video_codec && peer->video_codec->name ? peer->video_codec->name : "unknown";
+        const char *format_name =
+            peer->video_frame
+                ? av_get_pix_fmt_name(static_cast<AVPixelFormat>(peer->video_frame->format))
+                : nullptr;
+        pixel_format = format_name ? format_name : "unknown";
+
+        t_jit_matrix_info info{};
+        info.type = _jit_sym_char;
+        info.planecount = 4;
+        info.dimcount = 2;
+        info.dim[0] = width;
+        info.dim[1] = height;
+        jit_object_method(x->matrix, _jit_sym_setinfo, &info);
+
+        char *data = nullptr;
+        jit_object_method(x->matrix, _jit_sym_getdata, &data);
+        jit_object_method(x->matrix, _jit_sym_getinfo, &info);
+        if (!data) {
+            return;
+        }
+
+        const size_t source_width = static_cast<size_t>(width);
+        const size_t source_row_bytes = source_width * 4;
+        for (long row = 0; row < info.dim[1]; ++row) {
+            const auto *source =
+                peer->rgba_pixels.data() + static_cast<size_t>(row) * source_row_bytes;
+            auto *destination = reinterpret_cast<unsigned char *>(
+                data + static_cast<size_t>(row) * info.dimstride[1]);
+            for (size_t column = 0; column < source_width; ++column) {
+                const auto *rgba = source + column * 4;
+                auto *argb = destination + column * info.dimstride[0];
+                // FFmpeg produces RGBA, but a four-plane Jitter char matrix uses
+                // ARGB plane order.
+                argb[0] = rgba[3];
+                argb[1] = rgba[0];
+                argb[2] = rgba[1];
+                argb[3] = rgba[2];
+            }
+        }
+        x->serial = peer->video_serial;
     }
-    x->serial = peer->video_serial;
+
+    p2p_r_video_output_info(x, width, height, codec.c_str(), pixel_format.c_str());
     t_atom name;
     atom_setsym(&name, x->matrix_name);
-    outlet_anything(x->outlet, gensym("jit_matrix"), 1, &name);
+    outlet_anything(x->matrix_outlet, gensym("jit_matrix"), 1, &name);
 #endif
 }
 
@@ -146,7 +187,9 @@ static void *p2p_r_video_new(t_symbol *, long argc, t_atom *argv) {
     x->session = new std::shared_ptr<P2PSession>();
     x->registered = x->missing_reported = x->ambiguity_reported = false;
     x->serial = 0;
-    x->outlet = outlet_new((t_object *)x, "jit_matrix");
+    // Max creates outlets from right to left.
+    x->info_outlet = outlet_new((t_object *)x, nullptr);
+    x->matrix_outlet = outlet_new((t_object *)x, "jit_matrix");
     x->matrix_name = jit_symbol_unique();
     t_jit_matrix_info info{};
     jit_matrix_info_default(&info);

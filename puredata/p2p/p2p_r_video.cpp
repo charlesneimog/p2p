@@ -13,6 +13,9 @@
 #ifdef P2P_GEM_VIDEO
 #include "Gem/Image.h"
 #include "Gem/State.h"
+extern "C" {
+#include <libavutil/pixdesc.h>
+}
 #endif
 
 static t_class *p2p_r_video_class = nullptr;
@@ -24,6 +27,7 @@ struct P2PRVideo {
     std::shared_ptr<P2PSession> *session;
     t_clock *attach_clock;
     t_outlet *gem_outlet;
+    t_outlet *info_outlet;
     bool registered;
     bool missing_reported;
     bool ambiguity_reported;
@@ -32,6 +36,22 @@ struct P2PRVideo {
     uint64_t serial;
 #endif
 };
+
+#ifdef P2P_GEM_VIDEO
+static void p2p_r_video_output_info(P2PRVideo *object, int width, int height,
+                                    const char *codec, const char *pixel_format) {
+    t_atom resolution[2];
+    SETFLOAT(resolution, width);
+    SETFLOAT(resolution + 1, height);
+    outlet_anything(object->info_outlet, gensym("resolution"), 2, resolution);
+
+    t_atom value;
+    SETSYMBOL(&value, gensym(codec ? codec : "unknown"));
+    outlet_anything(object->info_outlet, gensym("codec"), 1, &value);
+    SETSYMBOL(&value, gensym(pixel_format ? pixel_format : "unknown"));
+    outlet_anything(object->info_outlet, gensym("pixel_format"), 1, &value);
+}
+#endif
 
 // ─────────────────────────────────────
 static void p2p_r_video_detach(P2PRVideo *object) {
@@ -94,11 +114,22 @@ static void p2p_r_video_gem_state(P2PRVideo *object, t_symbol *, int argc, t_ato
     auto peer = resolution.ambiguous ? std::shared_ptr<P2PPeer>() : resolution.peer;
     pixBlock *previous = nullptr;
     bool replaced = false;
+    int width = 0;
+    int height = 0;
+    std::string codec;
+    std::string pixel_format;
     if (peer && peer->active) {
         std::lock_guard<std::mutex> lock(peer->video_mutex);
         if (peer->video_serial && peer->rgba_frame && peer->rgba_frame->width > 0) {
-            const int width = peer->rgba_frame->width;
-            const int height = peer->rgba_frame->height;
+            width = peer->rgba_frame->width;
+            height = peer->rgba_frame->height;
+            codec =
+                peer->video_codec && peer->video_codec->name ? peer->video_codec->name : "unknown";
+            const char *format_name =
+                peer->video_frame
+                    ? av_get_pix_fmt_name(static_cast<AVPixelFormat>(peer->video_frame->format))
+                    : nullptr;
+            pixel_format = format_name ? format_name : "unknown";
             object->pixels->image.xsize = width;
             object->pixels->image.ysize = height;
             object->pixels->image.setFormat(GEM_RGBA);
@@ -113,6 +144,9 @@ static void p2p_r_video_gem_state(P2PRVideo *object, t_symbol *, int argc, t_ato
                 replaced = true;
             }
         }
+    }
+    if (replaced) {
+        p2p_r_video_output_info(object, width, height, codec.c_str(), pixel_format.c_str());
     }
     outlet_anything(object->gem_outlet, gensym("gem_state"), argc, argv);
     if (replaced) {
@@ -131,6 +165,7 @@ static void *p2p_r_video_new(t_symbol *, int argc, t_atom *argv) {
     object->missing_reported = false;
     object->ambiguity_reported = false;
     object->gem_outlet = outlet_new(&object->object, gensym("gem_state"));
+    object->info_outlet = outlet_new(&object->object, &s_anything);
     object->attach_clock = clock_new(object, reinterpret_cast<t_method>(p2p_r_video_poll));
 #ifdef P2P_GEM_VIDEO
     object->pixels = new pixBlock();

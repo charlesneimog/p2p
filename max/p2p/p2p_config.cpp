@@ -6,7 +6,6 @@
 
 #include <ext.h>
 #include <ext_obex.h>
-#include <z_dsp.h>
 
 #include <atomic>
 #include <memory>
@@ -96,6 +95,13 @@ static void *p2p_config_new(t_symbol *, long argc, t_atom *argv) {
     }
     *object->session_id = atom_getsym(argv)->s_name;
     *object->session = P2PSessionRegistry::acquire(*object->session_id);
+    if ((*object->session)->sampleRate() != 48000) {
+        object_error((t_object *)object,
+                     "[p2p.config] requires a sample rate of exactly 48000 Hz");
+        P2PSessionRegistry::release(*object->session_id, *object->session);
+        object->session->reset();
+        return object;
+    }
     object->controls_session = (*object->session)->claimController(object);
     if (!object->controls_session) {
         object_error((t_object *)object, "[p2p.config] another config already controls session '%s'",
@@ -111,9 +117,6 @@ static void *p2p_config_new(t_symbol *, long argc, t_atom *argv) {
                     p2p_config_output_event(lifetime, event);
                 }
             });
-    if ((*object->session)->sampleRate() != 48000) {
-        object_error((t_object *)object, "[p2p.config] expects sampleRate of 48000Hz");
-    }
     return object;
 }
 
@@ -137,19 +140,6 @@ static void p2p_config_free(P2PConfig *object) {
 static void p2p_config_connect(P2PConfig *object, t_symbol *url, t_symbol *room,
                                t_symbol *username) {
     if (object->session && *object->session && object->controls_session) {
-        const int current_sample_rate = static_cast<int>(sys_getsr());
-        const int session_sample_rate = (*object->session)->sampleRate();
-        if (current_sample_rate != 48000 || session_sample_rate != 48000) {
-            object_error(
-                (t_object *)object,
-                "[p2p.config] connection refused: Max/MSP must be running at 48000 Hz "
-                "(current: %d Hz, session: %d Hz)",
-                current_sample_rate, session_sample_rate);
-            t_atom atom;
-            atom_setsym(&atom, gensym("sample rate must be 48000 Hz"));
-            outlet_anything(object->outlet, gensym("error"), 1, &atom);
-            return;
-        }
         (*object->session)->connect(url->s_name, room->s_name, username->s_name);
     }
 }

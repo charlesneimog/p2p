@@ -20,8 +20,6 @@ extern "C" {
 }
 #endif
 
-class P2PSession;
-
 struct QueuedCandidate {
     std::string candidate;
     std::string mid;
@@ -32,7 +30,8 @@ public:
     P2PPeer(std::string peer_id, std::string username);
     ~P2PPeer();
 
-    void startTransmission(const std::weak_ptr<P2PSession> &session);
+    bool initializeEncoder(int sample_rate);
+    void startTransmission(int frame_size);
     void shutdown();
     bool popReceived(float &sample);
 
@@ -81,6 +80,9 @@ public:
 #endif
 
 private:
+    int encodeMono(const float *pcm, int samples, unsigned char *output, int capacity);
+
+    OpusEncoder *opus_enc_mono_{nullptr};
     std::thread tx_thread_;
     std::atomic<bool> thread_running_{false};
     std::mutex shutdown_mutex_;
