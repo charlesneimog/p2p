@@ -108,49 +108,14 @@ P2PSession::P2PSession(std::string id)
 
 void P2PSession::initialize() {
     rebuildRealtimePeersLocked();
-    int error_code = OPUS_OK;
-    opus_encoder_mono_ =
-        opus_encoder_create(sample_rate_, 1, OPUS_APPLICATION_AUDIO, &error_code);
-    if (error_code != OPUS_OK || !opus_encoder_mono_) {
-        error("Opus mono encoder error: %d", error_code);
-        return;
+    if (sample_rate_ != 48000) {
+        available_ = false;
     }
-    opus_encoder_ctl(opus_encoder_mono_, OPUS_SET_APPLICATION(OPUS_APPLICATION_AUDIO));
-    opus_encoder_ctl(opus_encoder_mono_, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
-    opus_encoder_ctl(opus_encoder_mono_, OPUS_SET_BITRATE(OPUS_BITRATE_MAX));
-    opus_encoder_ctl(opus_encoder_mono_, OPUS_SET_VBR(1));
-    opus_encoder_ctl(opus_encoder_mono_, OPUS_SET_VBR_CONSTRAINT(1));
-    opus_encoder_ctl(opus_encoder_mono_, OPUS_SET_COMPLEXITY(10));
-    opus_encoder_ctl(opus_encoder_mono_, OPUS_SET_INBAND_FEC(0));
-    opus_encoder_ctl(opus_encoder_mono_, OPUS_SET_DTX(0));
-
-    opus_encoder_stereo_ =
-        opus_encoder_create(sample_rate_, 2, OPUS_APPLICATION_AUDIO, &error_code);
-    if (error_code != OPUS_OK || !opus_encoder_stereo_) {
-        error("Opus stereo encoder error: %d", error_code);
-        return;
-    }
-    opus_encoder_ctl(opus_encoder_stereo_, OPUS_SET_APPLICATION(OPUS_APPLICATION_AUDIO));
-    opus_encoder_ctl(opus_encoder_stereo_, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
-    opus_encoder_ctl(opus_encoder_stereo_, OPUS_SET_BITRATE(OPUS_BITRATE_MAX));
-    opus_encoder_ctl(opus_encoder_stereo_, OPUS_SET_VBR(1));
-    opus_encoder_ctl(opus_encoder_stereo_, OPUS_SET_VBR_CONSTRAINT(1));
-    opus_encoder_ctl(opus_encoder_stereo_, OPUS_SET_COMPLEXITY(10));
-    opus_encoder_ctl(opus_encoder_stereo_, OPUS_SET_INBAND_FEC(0));
-    opus_encoder_ctl(opus_encoder_stereo_, OPUS_SET_DTX(0));
 }
 
 P2PSession::~P2PSession() {
     available_ = false;
     disconnect();
-    if (opus_encoder_mono_) {
-        opus_encoder_destroy(opus_encoder_mono_);
-        opus_encoder_mono_ = nullptr;
-    }
-    if (opus_encoder_stereo_) {
-        opus_encoder_destroy(opus_encoder_stereo_);
-        opus_encoder_stereo_ = nullptr;
-    }
 }
 
 const std::string &P2PSession::id() const {
@@ -550,14 +515,6 @@ P2PPeerResolution P2PSession::resolvePeer(const std::string &username) const {
     return result;
 }
 
-int P2PSession::encodeMono(const float *pcm, int samples, unsigned char *output, int capacity) {
-    std::lock_guard<std::mutex> lock(opus_encoder_mutex_);
-    if (!opus_encoder_mono_) {
-        return OPUS_INVALID_STATE;
-    }
-    return opus_encode_float(opus_encoder_mono_, pcm, samples, output, capacity);
-}
-
 int P2PSession::frameSize() const {
     return frame_size_;
 }
@@ -589,6 +546,10 @@ std::shared_ptr<P2PPeer> P2PSession::addPeer(const std::string &peer_id,
             return {};
         }
         peer = std::make_shared<P2PPeer>(peer_id, username);
+        if (!peer->initializeEncoder(sample_rate_)) {
+            error("Opus encoder error for peer '%s'", username.c_str());
+            return {};
+        }
         peers_by_id_[peer_id] = peer;
         peers_by_name_[username].push_back(peer);
         rebuildRealtimePeersLocked();
@@ -601,7 +562,7 @@ std::shared_ptr<P2PPeer> P2PSession::addPeer(const std::string &peer_id,
         peer->making_offer = should_be_caller;
     }
     peer->is_streaming = wants_stream_.load();
-    peer->startTransmission(weak_from_this());
+    peer->startTransmission(frame_size_);
     if (!setupWebRtc(peer)) {
         removePeer(peer_id, false);
         return {};

@@ -65,6 +65,9 @@ connect wss://your-server.example room-name username
 Use `stream 1` to start sending audio and `disconnect` to leave the room. See
 [`p2p-help.pd`](p2p-help.pd) for a complete Pure Data patch.
 
+Audio sessions require the Pd or Max audio engine to run at exactly 48 kHz.
+At that rate, the externals use Opus's minimum 120-sample (2.5 ms) frame size.
+
 ## Signaling server
 
 A signaling server is required to establish peer connections. The included

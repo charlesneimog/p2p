@@ -93,6 +93,12 @@ static void *p2p_config_new(t_symbol *, int argc, t_atom *argv) {
     }
     *object->session_id = atom_getsymbol(argv)->s_name;
     *object->session = P2PSessionRegistry::acquire(*object->session_id);
+    if ((*object->session)->sampleRate() != 48000) {
+        pd_error(object, "[p2p.config] requires a sample rate of exactly 48000 Hz");
+        P2PSessionRegistry::release(*object->session_id, *object->session);
+        object->session->reset();
+        return object;
+    }
     object->controls_session = (*object->session)->claimController(object);
     if (!object->controls_session) {
         pd_error(object, "[p2p.config] another config already controls session '%s'",
@@ -108,9 +114,6 @@ static void *p2p_config_new(t_symbol *, int argc, t_atom *argv) {
                     p2p_config_output_event(lifetime, event);
                 }
             });
-    if ((*object->session)->sampleRate() != 48000) {
-        pd_error(object, "[p2p.config] expects sampleRate of 48000Hz");
-    }
     return object;
 }
 

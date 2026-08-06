@@ -1,7 +1,5 @@
 #include "P2PPeer.hpp"
 
-#include "P2PSession.hpp"
-
 #include <chrono>
 P2PPeer::P2PPeer(std::string id, std::string name)
     : peer_id(std::move(id)), username(std::move(name)) {}
@@ -10,19 +8,37 @@ P2PPeer::~P2PPeer() {
     shutdown();
 }
 
-void P2PPeer::startTransmission(const std::weak_ptr<P2PSession> &weak_session) {
+bool P2PPeer::initializeEncoder(int sample_rate) {
+    int error_code = OPUS_OK;
+    opus_enc_mono_ = opus_encoder_create(sample_rate, 1, OPUS_APPLICATION_AUDIO, &error_code);
+    if (error_code != OPUS_OK || !opus_enc_mono_) {
+        opus_enc_mono_ = nullptr;
+        return false;
+    }
+    opus_encoder_ctl(opus_enc_mono_, OPUS_SET_SIGNAL(OPUS_SIGNAL_MUSIC));
+    opus_encoder_ctl(opus_enc_mono_, OPUS_SET_BITRATE(OPUS_BITRATE_MAX));
+    opus_encoder_ctl(opus_enc_mono_, OPUS_SET_VBR(1));
+    opus_encoder_ctl(opus_enc_mono_, OPUS_SET_VBR_CONSTRAINT(1));
+    opus_encoder_ctl(opus_enc_mono_, OPUS_SET_COMPLEXITY(10));
+    opus_encoder_ctl(opus_enc_mono_, OPUS_SET_INBAND_FEC(0));
+    opus_encoder_ctl(opus_enc_mono_, OPUS_SET_DTX(0));
+    return true;
+}
+
+int P2PPeer::encodeMono(const float *pcm, int samples, unsigned char *output, int capacity) {
+    if (!opus_enc_mono_) {
+        return OPUS_INVALID_STATE;
+    }
+    return opus_encode_float(opus_enc_mono_, pcm, samples, output, capacity);
+}
+
+void P2PPeer::startTransmission(int frame_size) {
     thread_running_ = true;
     std::weak_ptr<P2PPeer> weak_peer = shared_from_this();
-    tx_thread_ = std::thread([weak_peer, weak_session]() {
+    tx_thread_ = std::thread([weak_peer, frame_size]() {
         constexpr int maximum_opus_bytes = 4000;
         unsigned char opus_payload[maximum_opus_bytes];
-        auto session = weak_session.lock();
-        if (!session) {
-            return;
-        }
-        const int frame_size = session->frameSize();
         std::vector<float> pcm_frame(static_cast<size_t>(frame_size));
-        session.reset();
         int collected = 0;
 
         while (auto peer = weak_peer.lock()) {
@@ -38,13 +54,12 @@ void P2PPeer::startTransmission(const std::weak_ptr<P2PSession> &weak_session) {
                 continue;
             }
             collected = 0;
-            session = weak_session.lock();
-            if (!session || !peer->is_streaming || !peer->audio_track ||
+            if (!peer->is_streaming || !peer->audio_track ||
                 !peer->audio_track->isOpen() || !peer->rtp_config) {
                 continue;
             }
-            const int bytes =
-                session->encodeMono(pcm_frame.data(), frame_size, opus_payload, maximum_opus_bytes);
+            const int bytes = peer->encodeMono(pcm_frame.data(), frame_size, opus_payload,
+                                               maximum_opus_bytes);
             if (bytes <= 0) {
                 continue;
             }
@@ -74,6 +89,10 @@ void P2PPeer::shutdown() {
     }
     if (tx_thread_.joinable() && tx_thread_.get_id() != std::this_thread::get_id()) {
         tx_thread_.join();
+    }
+    if (opus_enc_mono_) {
+        opus_encoder_destroy(opus_enc_mono_);
+        opus_enc_mono_ = nullptr;
     }
     if (dc) {
         dc->close();

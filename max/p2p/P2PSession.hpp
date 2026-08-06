@@ -75,7 +75,6 @@ public:
     std::vector<std::shared_ptr<P2PPeer>> peerSnapshot() const;
     void pushOutgoingAudio(const float *samples, int count);
     P2PPeerResolution resolvePeer(const std::string &username) const;
-    int encodeMono(const float *pcm, int samples, unsigned char *output, int capacity);
     int frameSize() const;
     int sampleRate() const;
 
@@ -119,7 +118,7 @@ private:
 
     const std::string id_;
     const int sample_rate_;
-    const int frame_size_{480};
+    const int frame_size_{120}; // Minimum Opus frame: 2.5 ms at 48 kHz.
     std::atomic<bool> available_{true};
     std::atomic<bool> websocket_connected_{false};
     std::atomic<bool> wants_stream_{false};
@@ -150,7 +149,4 @@ private:
     const void *audio_sender_owner_{nullptr};
     std::unordered_map<std::string, const void *> audio_receiver_owners_;
 
-    OpusEncoder *opus_encoder_mono_{nullptr};
-    OpusEncoder *opus_encoder_stereo_{nullptr};
-    std::mutex opus_encoder_mutex_;
 };
