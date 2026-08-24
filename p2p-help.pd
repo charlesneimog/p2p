@@ -2,6 +2,7 @@
 #X declare -lib build/p2p;
 #X declare -lib Gem;
 #X declare -lib xlab;
+#X declare -lib p2p;
 #X obj 3 3 declare -lib build/p2p;
 #X obj 4 116 p2p.config LaFlauta;
 #X obj 4 364 vu 15 80 empty empty -1 -8 0 12 #404040 #000000 0 0;
@@ -63,11 +64,12 @@
 #X obj 512 423 nbx 5 16 -1e+37 1e+37 0 0 empty empty empty 0 -9 0 10 #fcfcfc #000000 #000000 0 256;
 #X obj 543 356 print;
 #X obj 49 328 dac~;
-#X obj 258 6 declare -lib xlab;
+#X obj 246 3 declare -lib xlab;
 #X obj 114 152 print;
 #X obj 86 328 print~;
 #X obj 86 283 bng 18 250 50 0 empty empty empty 0 -9 0 10 #fcfcfc #000000 #000000;
 #X obj 3 238 p2p.r.audio~ LaFlauta jordaninha;
+#X obj 355 3 declare -lib p2p;
 #X connect 1 0 10 0;
 #X connect 1 0 25 0;
 #X connect 3 0 2 0;

@@ -1,5 +1,5 @@
 ---
-name: Compile PureData Object
+name: Build and publish Pure Data and Max packages
 on:
     workflow_dispatch:
         inputs:
@@ -34,14 +34,27 @@ jobs:
             - name: Build
               run: |
                   export CXXFLAGS="-I$(brew --prefix boost)/include"
-                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64"       -DBOOST_ROOT=$(brew --prefix boost) -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include
+                  cmake -S . -B build \
+                    -DP2P_BUILD_MAX=ON \
+                    -DPD_FLOATSIZE=${{ matrix.precision }} \
+                    -DPD_LIB_DIR=./ \
+                    -DCMAKE_BUILD_TYPE=Release \
+                    -DCMAKE_OSX_ARCHITECTURES="arm64" \
+                    -DBOOST_ROOT=$(brew --prefix boost) \
+                    -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include
                   cmake --build build --parallel
                   find build -name "*.so" -exec otool -L {} \;
-            - name: Upload ONNX Folder
+            - name: Upload Pure Data package
               uses: actions/upload-artifact@v4
               with:
                   name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-pd${{ matrix.precision }}-${{ matrix.machines }}
                   path: build/${{env.LIBNAME}}
+            - name: Upload Max package
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-max-${{ matrix.machines }}
+                  path: build/${{ env.LIBNAME }}-max-package
+                  if-no-files-found: error
     linux:
         runs-on: ubuntu-latest
         strategy:
@@ -116,6 +129,7 @@ jobs:
                   gcc --version
                   g++ --version
                   cmake -S . -B build -G Ninja \
+                    -DP2P_BUILD_MAX=ON \
                     -DPD_FLOATSIZE=${{ matrix.precision }} \
                     -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} \
                     -DPD_LIB_DIR=./ \
@@ -123,49 +137,75 @@ jobs:
                     -DCMAKE_C_COMPILER=/mingw64/bin/gcc.exe \
                     -DCMAKE_CXX_COMPILER=/mingw64/bin/g++.exe
                   cmake --build build --parallel
-            - name: Upload
+            - name: Upload Pure Data package
               uses: actions/upload-artifact@v4
               with:
                   name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-pd${{ matrix.precision }}-windows-${{ matrix.arch }}
                   path: build/${{env.LIBNAME}}
+            - name: Upload Max package
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-max-windows-${{ matrix.arch }}
+                  path: build/${{ env.LIBNAME }}-max-package
+                  if-no-files-found: error
 
     publish-release:
-        if: ${{ github.event.inputs.publish_release }}
+        if: ${{ inputs.publish_release }}
         permissions:
             contents: write
         needs: [macos, linux, windows]
         runs-on: ubuntu-latest
         steps:
-            - name: Download puredata
+            - name: Download Pure Data artifacts
               uses: actions/download-artifact@v4
               with:
-                  pattern: p2p~-*
+                  pattern: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-pd*
                   merge-multiple: true
-                  path: ${{ env.LIBNAME }}
+                  path: release/pd/${{ env.LIBNAME }}
 
-            - name: Upload using docker deken
+            - name: Download Max artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  pattern: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-max-*
+                  merge-multiple: true
+                  path: release/max/${{ env.LIBNAME }}
+
+            - name: Verify release contents
+              run: |
+                  test -d release/pd/${{ env.LIBNAME }}
+                  test -d release/max/${{ env.LIBNAME }}/externals
+                  find release -maxdepth 4 -type f -print
+
+            - name: Package and upload Pure Data library to Deken
               env:
                   DEKEN_USERNAME: charlesneimog
                   DEKEN_PASSWORD: ${{ secrets.DEKEN_PASSWORD }}
               run: |
                   docker run --rm \
-                    --user $(id -u) \
-                    --volume $(pwd):/deken \
+                    --user "$(id -u):$(id -g)" \
+                    --volume "${{ github.workspace }}:/deken" \
+                    --workdir /deken \
                     registry.git.iem.at/pd/deken \
-                    deken package --version ${{ env.LIBVERSION }} ${{ env.LIBNAME }}
+                    deken package --version "${LIBVERSION}" "release/pd/${LIBNAME}"
+
+                  shopt -s nullglob
+                  deken_packages=(*.dek)
+                  test ${#deken_packages[@]} -gt 0
 
                   docker run --rm \
-                    --user $(id -u) \
-                    --volume $(pwd):/deken \
+                    --user "$(id -u):$(id -g)" \
+                    --volume "${{ github.workspace }}:/deken" \
+                    --workdir /deken \
                     -e DEKEN_USERNAME -e DEKEN_PASSWORD \
                     registry.git.iem.at/pd/deken \
-                    deken upload -v ${{ env.LIBVERSION }} *.dek
+                    deken upload -v "${LIBVERSION}" "${deken_packages[@]}"
 
-            - name: Create zip
+            - name: Create Max package archive
               run: |
-                  zip -r p2p~-${{ env.LIBVERSION }}.zip ${{ env.LIBNAME }}
+                  cd release/max
+                  zip -r "${GITHUB_WORKSPACE}/${LIBNAME}-${LIBVERSION}-max.zip" "${LIBNAME}"
 
-            - name: Create / Update GitHub Release
+            - name: Create or update GitHub release
               uses: softprops/action-gh-release@v2
               with:
                   tag_name: v${{ env.LIBVERSION }}
@@ -173,5 +213,7 @@ jobs:
                   target_commitish: ${{ github.sha }}
                   draft: true
                   prerelease: false
+                  generate_release_notes: true
+                  fail_on_unmatched_files: true
                   files: |
-                      p2p~-${{ env.LIBVERSION }}.zip
+                      ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-max.zip

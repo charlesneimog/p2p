@@ -25,12 +25,18 @@ enum class P2PEventType {
     Message,
 };
 
+enum class P2PLogLevel {
+    Normal,
+    Debug,
+    Error,
+};
+
 struct P2PEvent {
     P2PEventType type;
     std::string peer;
     std::string text;
     int count{0};
-    int log_level{0};
+    P2PLogLevel log_level{P2PLogLevel::Normal};
 };
 
 struct P2PPeerResolution {
@@ -41,8 +47,10 @@ struct P2PPeerResolution {
 class P2PSession : public std::enable_shared_from_this<P2PSession> {
 public:
     using Listener = std::function<void(const P2PEvent &)>;
+    using MainThreadDispatcher = std::function<void(std::function<void()>)>;
 
-    static std::shared_ptr<P2PSession> create(const std::string &id);
+    static std::shared_ptr<P2PSession> create(const std::string &id, int sample_rate,
+                                              MainThreadDispatcher dispatcher);
     ~P2PSession();
 
     const std::string &id() const;
@@ -79,10 +87,10 @@ public:
     int sampleRate() const;
 
 private:
-    explicit P2PSession(std::string id);
+    P2PSession(std::string id, int sample_rate, MainThreadDispatcher dispatcher);
     void initialize();
     void emit(P2PEvent event);
-    void log(int level, const char *format, ...);
+    void log(P2PLogLevel level, const char *format, ...);
     void error(const char *format, ...);
 
     void installWebSocketCallbacks();
@@ -111,13 +119,14 @@ private:
     bool createPeerDecoder(const std::shared_ptr<P2PPeer> &peer);
     void rebuildRealtimePeersLocked();
 
-#ifdef P2P_GEM_VIDEO
+#ifdef P2P_VIDEO
     bool initializeVideoDecoder(const std::shared_ptr<P2PPeer> &peer);
     void decodeVideoFrame(const std::shared_ptr<P2PPeer> &peer, const rtc::binary &data);
 #endif
 
     const std::string id_;
     const int sample_rate_;
+    const MainThreadDispatcher main_thread_dispatcher_;
     const int frame_size_{120}; // Minimum Opus frame: 2.5 ms at 48 kHz.
     std::atomic<bool> available_{true};
     std::atomic<bool> websocket_connected_{false};

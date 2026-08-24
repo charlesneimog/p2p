@@ -145,33 +145,44 @@ file(WRITE "${GEM_GENERATED_INCLUDE_DIR}/Gem/GemGLconfig.h"
 cpmaddpackage("gh:gabime/spdlog@1.17.0")
 set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-set(P2P_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/p2p_setup.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/P2PMainThreadDispatch.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/P2PPeer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/P2PSession.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/P2PSessionRegistry.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/p2p_config.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/p2p_s_audio.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/p2p_r_audio.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p/p2p_r_video.cpp")
+set(P2P_CORE_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p/P2PPeer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p/P2PSession.cpp")
 
-pd_add_external(p2p "${P2P_SOURCES}")
+add_library(p2p_core STATIC ${P2P_CORE_SOURCES})
+target_include_directories(
+    p2p_core
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p"
+    PRIVATE "${opus_SOURCE_DIR}/include")
+target_link_libraries(
+    p2p_core
+    PUBLIC nlohmann_json::nlohmann_json
+           datachannel-static
+           opus
+           FFmpeg::required
+           Boost::headers
+    PRIVATE spdlog)
+target_compile_definitions(p2p_core PUBLIC P2P_VIDEO=1)
+set_target_properties(p2p_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+set(P2P_PD_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_setup.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/P2PMainThreadDispatch.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/P2PSessionRegistry.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_config.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_s_audio.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_audio.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_video.cpp")
+
+pd_add_external(p2p "${P2P_PD_SOURCES}")
 pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/p2p-help.pd")
 pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/puredata")
 pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
-target_include_directories(p2p PRIVATE "${opus_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/puredata/p2p")
-target_link_libraries(
-    p2p
-    PRIVATE nlohmann_json::nlohmann_json
-            datachannel-static
-            spdlog
-            opus
-            Boost::headers)
+target_include_directories(p2p PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/pd")
+target_link_libraries(p2p PRIVATE p2p_core)
 
-target_compile_definitions(p2p PRIVATE P2P_GEM_VIDEO=1)
 target_include_directories(p2p PRIVATE "${GEM_GENERATED_INCLUDE_DIR}" "${Gem_SOURCE_DIR}/src")
 # Pd does not guarantee that symbols from the separately loaded Gem external are globally visible. Compile the image ABI
 # used by pixBlock into p2p~ so loading does not depend on Gem's dlopen visibility or load order.
@@ -186,28 +197,29 @@ target_sources(
 if(UNIX)
     target_compile_definitions(p2p PRIVATE HAVE_UNISTD_H=1 HAVE_SYS_TIME_H=1 HAVE_SYS_TYPES_H=1)
 endif()
-target_link_libraries(p2p PRIVATE FFmpeg::required)
-
-target_compile_options(
-    p2p
-    PRIVATE $<$<CONFIG:Release>:
-            $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-O3>
-            $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-ffunction-sections>
-            $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fdata-sections>
-            $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-math-errno>
-            $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-trapping-math>
-            $<$<CXX_COMPILER_ID:MSVC>:/O2>
-            $<$<CXX_COMPILER_ID:MSVC>:/Ob3>
-            $<$<CXX_COMPILER_ID:MSVC>:/Oi>
-            $<$<CXX_COMPILER_ID:MSVC>:/Ot>
-            $<$<CXX_COMPILER_ID:MSVC>:/fp:fast>
-            $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:AppleClang,Clang,GNU>>:-msse4.2>
-            $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/arch:AVX2>
-            >)
+foreach(P2P_TARGET p2p_core p2p)
+    target_compile_options(
+        ${P2P_TARGET}
+        PRIVATE $<$<CONFIG:Release>:
+                $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-O3>
+                $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-ffunction-sections>
+                $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fdata-sections>
+                $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-math-errno>
+                $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-fno-trapping-math>
+                $<$<CXX_COMPILER_ID:MSVC>:/O2>
+                $<$<CXX_COMPILER_ID:MSVC>:/Ob3>
+                $<$<CXX_COMPILER_ID:MSVC>:/Oi>
+                $<$<CXX_COMPILER_ID:MSVC>:/Ot>
+                $<$<CXX_COMPILER_ID:MSVC>:/fp:fast>
+                $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:AppleClang,Clang,GNU>>:-msse4.2>
+                $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/arch:AVX2>
+                >)
+endforeach()
 
 set_target_properties(opus PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(p2p_core PRIVATE -g)
     target_compile_options(p2p PRIVATE -g)
 endif()
 

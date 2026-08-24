@@ -10,7 +10,7 @@
 #include <memory>
 #include <string>
 
-#ifdef P2P_GEM_VIDEO
+#ifdef P2P_VIDEO
 #include "Gem/Image.h"
 #include "Gem/State.h"
 extern "C" {
@@ -31,13 +31,13 @@ struct P2PRVideo {
     bool registered;
     bool missing_reported;
     bool ambiguity_reported;
-#ifdef P2P_GEM_VIDEO
+#ifdef P2P_VIDEO
     pixBlock *pixels;
     uint64_t serial;
 #endif
 };
 
-#ifdef P2P_GEM_VIDEO
+#ifdef P2P_VIDEO
 static void p2p_r_video_output_info(P2PRVideo *object, int width, int height,
                                     const char *codec, const char *pixel_format) {
     t_atom resolution[2];
@@ -97,7 +97,7 @@ static void p2p_r_video_poll(P2PRVideo *object) {
 
 // ─────────────────────────────────────
 static void p2p_r_video_gem_state(P2PRVideo *object, t_symbol *, int argc, t_atom *argv) {
-#ifndef P2P_GEM_VIDEO
+#ifndef P2P_VIDEO
     outlet_anything(object->gem_outlet, gensym("gem_state"), argc, argv);
 #else
     if (argc != 2 || argv[0].a_type != A_POINTER || argv[1].a_type != A_POINTER) {
@@ -167,7 +167,7 @@ static void *p2p_r_video_new(t_symbol *, int argc, t_atom *argv) {
     object->gem_outlet = outlet_new(&object->object, gensym("gem_state"));
     object->info_outlet = outlet_new(&object->object, &s_anything);
     object->attach_clock = clock_new(object, reinterpret_cast<t_method>(p2p_r_video_poll));
-#ifdef P2P_GEM_VIDEO
+#ifdef P2P_VIDEO
     object->pixels = new pixBlock();
     object->serial = 0;
 #else
@@ -189,7 +189,7 @@ static void p2p_r_video_free(P2PRVideo *object) {
     clock_unset(object->attach_clock);
     clock_free(object->attach_clock);
     p2p_r_video_detach(object);
-#ifdef P2P_GEM_VIDEO
+#ifdef P2P_VIDEO
     delete object->pixels;
 #endif
     delete object->session;

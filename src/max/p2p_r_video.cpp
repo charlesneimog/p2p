@@ -5,12 +5,13 @@
 #include <ext.h>
 #include <ext_obex.h>
 #include <jit.common.h>
+#include <z_dsp.h>
 
 #include <atomic>
 #include <memory>
 #include <string>
 
-#ifdef P2P_JITTER_VIDEO
+#ifdef P2P_VIDEO
 extern "C" {
 #include <libavutil/pixdesc.h>
 }
@@ -34,7 +35,7 @@ struct P2PRVideo {
     bool ambiguity_reported;
 };
 
-#ifdef P2P_JITTER_VIDEO
+#ifdef P2P_VIDEO
 static void p2p_r_video_output_info(P2PRVideo *x, long width, long height,
                                     const char *codec, const char *pixel_format) {
     t_atom resolution[2];
@@ -66,7 +67,7 @@ static void p2p_r_video_attach(P2PRVideo *x) {
     // Acquire rather than merely find: this lets the video object be created
     // before p2p.config. The later config object acquires the same session and
     // its connect message therefore negotiates video from the first offer.
-    auto session = P2PSessionRegistry::acquire(*x->session_id);
+    auto session = P2PSessionRegistry::acquire(*x->session_id, static_cast<int>(sys_getsr()));
     session->registerVideoReceiver();
     x->registered = true;
     std::atomic_store(x->session, std::move(session));
@@ -104,7 +105,7 @@ static void p2p_r_video_poll(P2PRVideo *x) {
 }
 
 static void p2p_r_video_output_matrix(P2PRVideo *x) {
-#ifndef P2P_JITTER_VIDEO
+#ifndef P2P_VIDEO
     object_error((t_object *)x, "video support was not compiled");
 #else
     if (!x->matrix) {

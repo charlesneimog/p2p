@@ -102,7 +102,7 @@ void P2PPeer::shutdown() {
         audio_track->close();
         audio_track.reset();
     }
-#ifdef P2P_JITTER_VIDEO
+#ifdef P2P_VIDEO
     if (video_track) {
         video_track->close();
         video_track.reset();
@@ -119,7 +119,7 @@ void P2PPeer::shutdown() {
             opus_dec_mono = nullptr;
         }
     }
-#ifdef P2P_JITTER_VIDEO
+#ifdef P2P_VIDEO
     {
         std::lock_guard<std::mutex> lock(video_mutex);
         sws_freeContext(video_scaler);

@@ -1,5 +1,6 @@
 #include "P2PSessionRegistry.hpp"
 
+#include "P2PMainThreadDispatch.hpp"
 #include "P2PSession.hpp"
 
 #include <mutex>
@@ -10,12 +11,12 @@ std::mutex registry_mutex;
 std::unordered_map<std::string, std::weak_ptr<P2PSession>> sessions;
 
 // ─────────────────────────────────────
-std::shared_ptr<P2PSession> P2PSessionRegistry::acquire(const std::string &id) {
+std::shared_ptr<P2PSession> P2PSessionRegistry::acquire(const std::string &id, int sample_rate) {
     std::lock_guard<std::mutex> lock(registry_mutex);
     auto &entry = sessions[id];
     auto session = entry.lock();
     if (!session) {
-        session = P2PSession::create(id);
+        session = P2PSession::create(id, sample_rate, P2PMainThreadDispatch::enqueue);
         entry = session;
     }
     return session;

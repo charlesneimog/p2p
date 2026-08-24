@@ -12,7 +12,7 @@
 #include <opus.h>
 #include <rtc/rtc.hpp>
 
-#ifdef P2P_JITTER_VIDEO
+#ifdef P2P_VIDEO
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
@@ -64,7 +64,7 @@ public:
     std::mutex opus_dec_mono_mutex;
     std::vector<std::function<void()>> pending_negotiations;
 
-#ifdef P2P_JITTER_VIDEO
+#ifdef P2P_VIDEO
     std::shared_ptr<rtc::Track> video_track;
     const AVCodec *video_codec{nullptr};
     AVCodecContext *video_decoder{nullptr};

@@ -22,21 +22,16 @@ set(MAX_SDK_MSP_INCLUDES "${MAX_SDK_BASE_DIR}/c74support/msp-includes")
 set(MAX_SDK_JIT_INCLUDES "${MAX_SDK_BASE_DIR}/c74support/jit-includes")
 
 add_library(
-    p2p_max_core STATIC
-    p2p/P2PMainThreadDispatch.cpp
-    p2p/P2PPeer.cpp
-    p2p/P2PSession.cpp
-    p2p/P2PSessionRegistry.cpp)
+    p2p_max_host STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src/max/P2PMainThreadDispatch.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src/max/P2PSessionRegistry.cpp")
 target_include_directories(
-    p2p_max_core
-    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/p2p"
-    PRIVATE "${opus_SOURCE_DIR}/include" ${MAX_SDK_INCLUDES} ${MAX_SDK_MSP_INCLUDES} ${MAX_SDK_JIT_INCLUDES})
-target_link_libraries(
-    p2p_max_core
-    PUBLIC nlohmann_json::nlohmann_json datachannel-static opus FFmpeg::required Boost::headers
-    PRIVATE spdlog)
-target_compile_definitions(p2p_max_core PUBLIC P2P_JITTER_VIDEO=1)
-set_target_properties(p2p_max_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    p2p_max_host
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../src/max"
+           "${CMAKE_CURRENT_SOURCE_DIR}/../src/p2p"
+    PRIVATE ${MAX_SDK_INCLUDES} ${MAX_SDK_MSP_INCLUDES} ${MAX_SDK_JIT_INCLUDES})
+target_link_libraries(p2p_max_host PUBLIC p2p_core)
+set_target_properties(p2p_max_host PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_subdirectory(externals/p2p.config)
 add_subdirectory(externals/p2p.s.audio_tilde)

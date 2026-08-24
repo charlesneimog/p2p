@@ -1,5 +1,6 @@
 #include "P2PSessionRegistry.hpp"
 
+#include "P2PMainThreadDispatch.hpp"
 #include "P2PSession.hpp"
 
 #include <ext.h>
@@ -25,13 +26,13 @@ RegistryState &registry() {
 }
 }
 
-std::shared_ptr<P2PSession> P2PSessionRegistry::acquire(const std::string &id) {
+std::shared_ptr<P2PSession> P2PSessionRegistry::acquire(const std::string &id, int sample_rate) {
     auto &state = registry();
     std::lock_guard<std::mutex> lock(state.mutex);
     auto &entry = state.sessions[id];
     auto session = entry.lock();
     if (!session) {
-        session = P2PSession::create(id);
+        session = P2PSession::create(id, sample_rate, P2PMainThreadDispatch::enqueue);
         entry = session;
     }
     return session;
