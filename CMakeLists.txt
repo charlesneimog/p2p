@@ -145,9 +145,8 @@ file(WRITE "${GEM_GENERATED_INCLUDE_DIR}/Gem/GemGLconfig.h"
 cpmaddpackage("gh:gabime/spdlog@1.17.0")
 set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-set(P2P_CORE_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p/P2PPeer.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p/P2PSession.cpp")
+set(P2P_CORE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p/P2PPeer.cpp"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p/P2PSession.cpp")
 
 add_library(p2p_core STATIC ${P2P_CORE_SOURCES})
 target_include_directories(
@@ -179,6 +178,16 @@ pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/p2p-help.pd")
 pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/puredata")
 pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 pd_add_datafile(p2p "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+
+file(
+    GLOB
+    P2P_PD_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/*.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p/*.hpp")
+
+pd_add_datafile(p2p "${P2P_PD_SOURCES}")
 
 target_include_directories(p2p PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/pd")
 target_link_libraries(p2p PRIVATE p2p_core)
