@@ -7,8 +7,10 @@ Replace the signalling URL, room, and local username in the `connect` message.
    `connections 0`.
 2. Join as `alice` from another client. Expect `peer joined alice`, followed by
    `connections 1` when the PeerConnection reaches `Connected`.
-3. Start DSP and enable `stream 1`. The ADC mono signal is sent to all current
-   peers and to peers which join later.
+3. Start DSP and enable `stream 1`. A one-channel signal is sent as mono. Connect
+   a two-channel multichannel signal and confirm that distinct left and right
+   inputs arrive as stereo. Both are sent to all current peers and to peers which
+   join later.
 4. Disconnect and reconnect Alice under the same username. The receive outlet
    must be silent between connections and resume without recreating the object.
 5. With GEM available, create the video receiver before connecting. Until an

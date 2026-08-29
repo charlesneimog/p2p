@@ -81,7 +81,7 @@ public:
     bool videoNegotiated() const;
 
     std::vector<std::shared_ptr<P2PPeer>> peerSnapshot() const;
-    void pushOutgoingAudio(const float *samples, int count);
+    void pushOutgoingAudio(const float *samples, int count, int channels = 1);
     P2PPeerResolution resolvePeer(const std::string &username) const;
     int frameSize() const;
     int sampleRate() const;

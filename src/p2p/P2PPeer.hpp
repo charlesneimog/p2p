@@ -25,13 +25,19 @@ struct QueuedCandidate {
     std::string mid;
 };
 
+struct QueuedAudioSample {
+    float left;
+    float right;
+    int channels;
+};
+
 class P2PPeer : public std::enable_shared_from_this<P2PPeer> {
 public:
     P2PPeer(std::string peer_id, std::string username);
     ~P2PPeer();
 
     bool initializeEncoder(int sample_rate);
-    void startTransmission(int frame_size);
+    void startTransmission(int frame_size, int sample_rate);
     void shutdown();
     bool popReceived(float &sample);
 
@@ -56,7 +62,7 @@ public:
     std::shared_ptr<rtc::PeerConnection> pc;
     std::shared_ptr<rtc::DataChannel> dc;
     std::shared_ptr<rtc::Track> audio_track;
-    boost::lockfree::spsc_queue<float, boost::lockfree::capacity<16384>> send_buffer;
+    boost::lockfree::spsc_queue<QueuedAudioSample, boost::lockfree::capacity<16384>> send_buffer;
     boost::lockfree::spsc_queue<float, boost::lockfree::capacity<16384>> receive_buffer;
     uint32_t audio_ssrc{0};
     std::shared_ptr<rtc::RtpPacketizationConfig> rtp_config;
@@ -81,8 +87,10 @@ public:
 
 private:
     int encodeMono(const float *pcm, int samples, unsigned char *output, int capacity);
+    int encodeStereo(const float *pcm, int samples, unsigned char *output, int capacity);
 
     OpusEncoder *opus_enc_mono_{nullptr};
+    OpusEncoder *opus_enc_stereo_{nullptr};
     std::thread tx_thread_;
     std::atomic<bool> thread_running_{false};
     std::mutex shutdown_mutex_;

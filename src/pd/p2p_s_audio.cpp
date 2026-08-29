@@ -1,5 +1,3 @@
-#include "PdFrontends.hpp"
-
 #include "P2PSession.hpp"
 #include "P2PSessionRegistry.hpp"
 
@@ -78,20 +76,22 @@ static t_int *p2p_s_audio_perform(t_int *w) {
     auto *object = reinterpret_cast<P2PSAudio *>(w[1]);
     auto *input = reinterpret_cast<t_sample *>(w[2]);
     const int count = static_cast<int>(w[3]);
+    const int channels = static_cast<int>(w[4]);
     auto *session = object->realtime_session->load(std::memory_order_acquire);
     if (session && session->available()) {
 #if PD_FLOATSIZE == 32
-        session->pushOutgoingAudio(input, count);
+        session->pushOutgoingAudio(input, count, channels);
 #else
 #error "Not Supported"
 #endif
     }
-    return w + 4;
+    return w + 5;
 }
 
 // ─────────────────────────────────────
 static void p2p_s_audio_dsp(P2PSAudio *object, t_signal **signals) {
-    dsp_add(p2p_s_audio_perform, 3, object, signals[0]->s_vec, signals[0]->s_n);
+    const int channels = signals[0]->s_nchans == 2 ? 2 : 1;
+    dsp_add(p2p_s_audio_perform, 4, object, signals[0]->s_vec, signals[0]->s_n, channels);
 }
 
 // ─────────────────────────────────────
@@ -127,10 +127,11 @@ static void p2p_s_audio_free(P2PSAudio *object) {
 }
 
 // ─────────────────────────────────────
-void p2p_s_audio_setup() {
-    p2p_s_audio_class = class_new(
-        gensym("p2p.s.audio~"), reinterpret_cast<t_newmethod>(p2p_s_audio_new),
-        reinterpret_cast<t_method>(p2p_s_audio_free), sizeof(P2PSAudio), CLASS_DEFAULT, A_GIMME, 0);
+extern "C" void setup_p2p0x2es0x2eaudio_tilde() {
+    p2p_s_audio_class =
+        class_new(gensym("p2p.s.audio~"), reinterpret_cast<t_newmethod>(p2p_s_audio_new),
+                  reinterpret_cast<t_method>(p2p_s_audio_free), sizeof(P2PSAudio),
+                  CLASS_MULTICHANNEL, A_GIMME, 0);
 
     CLASS_MAINSIGNALIN(p2p_s_audio_class, P2PSAudio, signal);
     class_addmethod(p2p_s_audio_class, reinterpret_cast<t_method>(p2p_s_audio_dsp), gensym("dsp"),

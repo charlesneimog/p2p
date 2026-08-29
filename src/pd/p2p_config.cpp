@@ -1,5 +1,3 @@
-#include "PdFrontends.hpp"
-
 #include "P2PSession.hpp"
 #include "P2PSessionRegistry.hpp"
 
@@ -46,8 +44,8 @@ static void p2p_config_output_event(const std::shared_ptr<ConfigLifetime> &lifet
     }
     switch (event.type) {
     case P2PEventType::Log:
-        logpost(lifetime->object, p2p_config_log_level(event.log_level),
-                "[p2p.config] %s", event.text.c_str());
+        logpost(lifetime->object, p2p_config_log_level(event.log_level), "[p2p.config] %s",
+                event.text.c_str());
         break;
     case P2PEventType::Error: {
         pd_error(lifetime->object, "[p2p.config] %s", event.text.c_str());
@@ -71,8 +69,7 @@ static void p2p_config_output_event(const std::shared_ptr<ConfigLifetime> &lifet
     case P2PEventType::PeerJoined:
     case P2PEventType::PeerLeft: {
         t_atom atoms[2];
-        SETSYMBOL(&atoms[0],
-                  gensym(event.type == P2PEventType::PeerJoined ? "joined" : "left"));
+        SETSYMBOL(&atoms[0], gensym(event.type == P2PEventType::PeerJoined ? "joined" : "left"));
         SETSYMBOL(&atoms[1], gensym(event.peer.c_str()));
         outlet_anything(lifetime->outlet, gensym("peer"), 2, atoms);
         break;
@@ -98,14 +95,13 @@ static void *p2p_config_new(t_symbol *, int argc, t_atom *argv) {
     (*object->lifetime)->object = &object->object;
     (*object->lifetime)->outlet = object->outlet;
 
-    if (argc < 1 || argv[0].a_type != A_SYMBOL ||
-        !atom_getsymbol(argv)->s_name[0]) {
+    if (argc < 1 || argv[0].a_type != A_SYMBOL || !atom_getsymbol(argv)->s_name[0]) {
         pd_error(object, "[p2p.config] missing session ID");
         return object;
     }
     *object->session_id = atom_getsymbol(argv)->s_name;
-    *object->session = P2PSessionRegistry::acquire(
-        *object->session_id, static_cast<int>(sys_getsr()));
+    *object->session =
+        P2PSessionRegistry::acquire(*object->session_id, static_cast<int>(sys_getsr()));
     if ((*object->session)->sampleRate() != 48000) {
         pd_error(object, "[p2p.config] requires a sample rate of exactly 48000 Hz");
         P2PSessionRegistry::release(*object->session_id, *object->session);
@@ -120,13 +116,11 @@ static void *p2p_config_new(t_symbol *, int argc, t_atom *argv) {
         return object;
     }
     std::weak_ptr<ConfigLifetime> weak_lifetime = *object->lifetime;
-    object->listener_id =
-        (*object->session)
-            ->addListener([weak_lifetime](const P2PEvent &event) {
-                if (auto lifetime = weak_lifetime.lock()) {
-                    p2p_config_output_event(lifetime, event);
-                }
-            });
+    object->listener_id = (*object->session)->addListener([weak_lifetime](const P2PEvent &event) {
+        if (auto lifetime = weak_lifetime.lock()) {
+            p2p_config_output_event(lifetime, event);
+        }
+    });
     return object;
 }
 
@@ -203,11 +197,10 @@ static void p2p_config_report(P2PConfig *object) {
     }
 }
 
-void p2p_config_setup() {
-    p2p_config_class =
-        class_new(gensym("p2p.config"), reinterpret_cast<t_newmethod>(p2p_config_new),
-                  reinterpret_cast<t_method>(p2p_config_free), sizeof(P2PConfig), CLASS_DEFAULT,
-                  A_GIMME, 0);
+extern "C" void setup_p2p0x2econfig() {
+    p2p_config_class = class_new(
+        gensym("p2p.config"), reinterpret_cast<t_newmethod>(p2p_config_new),
+        reinterpret_cast<t_method>(p2p_config_free), sizeof(P2PConfig), CLASS_DEFAULT, A_GIMME, 0);
     class_addmethod(p2p_config_class, reinterpret_cast<t_method>(p2p_config_connect),
                     gensym("connect"), A_SYMBOL, A_SYMBOL, A_SYMBOL, 0);
     class_addmethod(p2p_config_class, reinterpret_cast<t_method>(p2p_config_disconnect),

@@ -18,7 +18,7 @@ namespace {
 constexpr auto P2P_LOG_NORMAL = P2PLogLevel::Normal;
 constexpr auto P2P_LOG_DEBUG = P2PLogLevel::Debug;
 constexpr auto P2P_LOG_ERROR = P2PLogLevel::Error;
-}
+} // namespace
 
 namespace {
 const char *candidateTypeName(rtc::Candidate::Type type) {
@@ -62,21 +62,22 @@ CaBundleResolution resolveCaBundle() {
         if (isReadableRegularFile(environment_path)) {
             return {environment_path, {}};
         }
-        return {{}, std::string("SSL_CERT_FILE does not name a readable CA bundle: '") +
-                        environment_path + "'"};
+        return {{},
+                std::string("SSL_CERT_FILE does not name a readable CA bundle: '") +
+                    environment_path + "'"};
     }
 
     // OpenSSL built into this external may have a prefix which differs from the
     // host system. Prefer the host's maintained trust bundle when it exists.
     static constexpr const char *candidate_paths[] = {
-        "/etc/ssl/certs/ca-certificates.crt",                  // Debian, Ubuntu, Arch
-        "/etc/pki/tls/certs/ca-bundle.crt",                   // Fedora, RHEL
-        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",  // Fedora, RHEL
-        "/etc/ssl/ca-bundle.pem",                             // openSUSE
-        "/etc/ssl/cert.pem",                                  // Alpine, macOS with OpenSSL
-        "/usr/local/share/certs/ca-root-nss.crt",             // FreeBSD
-        "/opt/homebrew/etc/openssl@3/cert.pem",               // Apple Silicon Homebrew
-        "/usr/local/etc/openssl@3/cert.pem",                  // Intel Homebrew
+        "/etc/ssl/certs/ca-certificates.crt",                // Debian, Ubuntu, Arch
+        "/etc/pki/tls/certs/ca-bundle.crt",                  // Fedora, RHEL
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", // Fedora, RHEL
+        "/etc/ssl/ca-bundle.pem",                            // openSUSE
+        "/etc/ssl/cert.pem",                                 // Alpine, macOS with OpenSSL
+        "/usr/local/share/certs/ca-root-nss.crt",            // FreeBSD
+        "/opt/homebrew/etc/openssl@3/cert.pem",              // Apple Silicon Homebrew
+        "/usr/local/etc/openssl@3/cert.pem",                 // Intel Homebrew
     };
     for (const char *candidate : candidate_paths) {
         if (isReadableRegularFile(candidate)) {
@@ -91,8 +92,8 @@ CaBundleResolution resolveCaBundle() {
 
 std::shared_ptr<P2PSession> P2PSession::create(const std::string &id, int sample_rate,
                                                MainThreadDispatcher dispatcher) {
-    auto session = std::shared_ptr<P2PSession>(
-        new P2PSession(id, sample_rate, std::move(dispatcher)));
+    auto session =
+        std::shared_ptr<P2PSession>(new P2PSession(id, sample_rate, std::move(dispatcher)));
     session->initialize();
     return session;
 }
@@ -472,17 +473,20 @@ std::vector<std::shared_ptr<P2PPeer>> P2PSession::peerSnapshot() const {
     return peers;
 }
 
-void P2PSession::pushOutgoingAudio(const float *samples, int count) {
+void P2PSession::pushOutgoingAudio(const float *samples, int count, int channels) {
     const auto *peers = realtime_peers_.load(std::memory_order_acquire);
-    if (!peers || !wants_stream_) {
+    if (!peers) {
         return;
     }
+    channels = channels == 2 ? 2 : 1;
     for (const auto &peer : *peers) {
-        if (!peer->active || !peer->connected || !peer->is_streaming) {
+        if (!peer->active || !peer->connected) {
             continue;
         }
         for (int index = 0; index < count; ++index) {
-            peer->send_buffer.push(samples[index]);
+            const float left = samples[index];
+            const float right = channels == 2 ? samples[count + index] : left;
+            peer->send_buffer.push({left, right, channels});
         }
     }
 }
@@ -556,7 +560,7 @@ std::shared_ptr<P2PPeer> P2PSession::addPeer(const std::string &peer_id,
         peer->making_offer = should_be_caller;
     }
     peer->is_streaming = wants_stream_.load();
-    peer->startTransmission(frame_size_);
+    peer->startTransmission(frame_size_, sample_rate_);
     if (!setupWebRtc(peer)) {
         removePeer(peer_id, false);
         return {};
@@ -628,8 +632,7 @@ void P2PSession::rebuildRealtimePeersLocked() {
     for (const auto &entry : peers_by_id_) {
         peers->push_back(entry.second);
     }
-    auto immutable =
-        std::static_pointer_cast<const std::vector<std::shared_ptr<P2PPeer>>>(peers);
+    auto immutable = std::static_pointer_cast<const std::vector<std::shared_ptr<P2PPeer>>>(peers);
     retained_peer_snapshots_.push_back(immutable);
     realtime_peers_.store(immutable.get(), std::memory_order_release);
 }
@@ -830,8 +833,7 @@ bool P2PSession::createPeerDecoder(const std::shared_ptr<P2PPeer> &peer) {
     return true;
 }
 
-void P2PSession::decodeAudio(const std::shared_ptr<P2PPeer> &peer,
-                             const rtc::binary &data) {
+void P2PSession::decodeAudio(const std::shared_ptr<P2PPeer> &peer, const rtc::binary &data) {
     constexpr int maximum_samples = 5760;
     float pcm[maximum_samples];
     int samples;
@@ -841,10 +843,9 @@ void P2PSession::decodeAudio(const std::shared_ptr<P2PPeer> &peer,
             error("Opus decode not initialized");
             return;
         }
-        samples =
-            opus_decode_float(peer->opus_dec_mono,
-                              reinterpret_cast<const unsigned char *>(data.data()),
-                              static_cast<opus_int32>(data.size()), pcm, maximum_samples, 0);
+        samples = opus_decode_float(peer->opus_dec_mono,
+                                    reinterpret_cast<const unsigned char *>(data.data()),
+                                    static_cast<opus_int32>(data.size()), pcm, maximum_samples, 0);
     }
     if (samples > 0) {
         for (int index = 0; index < samples; ++index) {
@@ -859,8 +860,7 @@ void P2PSession::updateConnectionState(const std::shared_ptr<P2PPeer> &peer,
                                        rtc::PeerConnection::State state) {
     const bool now_connected = state == rtc::PeerConnection::State::Connected;
     const bool was_connected = peer->connected.exchange(now_connected);
-    if (was_connected != now_connected ||
-        state == rtc::PeerConnection::State::Failed ||
+    if (was_connected != now_connected || state == rtc::PeerConnection::State::Failed ||
         state == rtc::PeerConnection::State::Disconnected ||
         state == rtc::PeerConnection::State::Closed) {
         emitConnectionCount();
@@ -983,7 +983,7 @@ bool P2PSession::setupWebRtc(const std::shared_ptr<P2PPeer> &peer) {
         }
         if (state == rtc::PeerConnection::IceState::Connected ||
             state == rtc::PeerConnection::IceState::Completed) {
-            session->warnIfNotStunPair(locked_peer);
+            // session->warnIfNotStunPair(locked_peer);
         }
     });
     peer->pc->onLocalCandidate([weak_session, weak_peer](rtc::Candidate candidate) {
@@ -999,57 +999,54 @@ bool P2PSession::setupWebRtc(const std::shared_ptr<P2PPeer> &peer) {
             {"candidate", {{"candidate", std::string(candidate)}, {"sdpMid", candidate.mid()}}}};
         locked_peer->ws->send(message.dump());
     });
-    peer->pc->onLocalDescription(
-        [weak_session, weak_peer](rtc::Description description) {
-            auto session = weak_session.lock();
-            auto locked_peer = weak_peer.lock();
-            if (!session || !locked_peer || !locked_peer->active) {
-                return;
-            }
-            const std::string type = description.typeString();
-            session->log(P2P_LOG_DEBUG, "onLocalDescription %s", type.c_str());
-            if (type == "offer") {
-                const bool post_answer_offer =
-                    !locked_peer->making_offer && locked_peer->remote_description_set;
-                if (post_answer_offer) {
-                    if (!locked_peer->is_polite || locked_peer->polite_media_offer_sent) {
-                        session->log(P2P_LOG_DEBUG,
-                                     "Suppressing follow-up local offer for peer '%s'",
-                                     locked_peer->username.c_str());
-                        return;
-                    }
-                    locked_peer->polite_media_offer_sent = true;
-                    session->log(P2P_LOG_DEBUG,
-                                 "Sending one polite media update offer for peer '%s'",
+    peer->pc->onLocalDescription([weak_session, weak_peer](rtc::Description description) {
+        auto session = weak_session.lock();
+        auto locked_peer = weak_peer.lock();
+        if (!session || !locked_peer || !locked_peer->active) {
+            return;
+        }
+        const std::string type = description.typeString();
+        session->log(P2P_LOG_DEBUG, "onLocalDescription %s", type.c_str());
+        if (type == "offer") {
+            const bool post_answer_offer =
+                !locked_peer->making_offer && locked_peer->remote_description_set;
+            if (post_answer_offer) {
+                if (!locked_peer->is_polite || locked_peer->polite_media_offer_sent) {
+                    session->log(P2P_LOG_DEBUG, "Suppressing follow-up local offer for peer '%s'",
                                  locked_peer->username.c_str());
+                    return;
                 }
-                locked_peer->making_offer = false;
-                locked_peer->local_offer_sent = true;
-            } else if (type == "answer") {
-                locked_peer->answering_offer = false;
+                locked_peer->polite_media_offer_sent = true;
+                session->log(P2P_LOG_DEBUG, "Sending one polite media update offer for peer '%s'",
+                             locked_peer->username.c_str());
             }
-            if (locked_peer->ws) {
-                json message = {{"type", type},
-                                {"sdp", {{"type", type}, {"sdp", std::string(description)}}},
-                                {"to", locked_peer->peer_id}};
-                locked_peer->ws->send(message.dump());
-            } else {
-                session->error("Error: WebSocket missing onLocalDescription");
-            }
-        });
+            locked_peer->making_offer = false;
+            locked_peer->local_offer_sent = true;
+        } else if (type == "answer") {
+            locked_peer->answering_offer = false;
+        }
+        if (locked_peer->ws) {
+            json message = {{"type", type},
+                            {"sdp", {{"type", type}, {"sdp", std::string(description)}}},
+                            {"to", locked_peer->peer_id}};
+            locked_peer->ws->send(message.dump());
+        } else {
+            session->error("Error: WebSocket missing onLocalDescription");
+        }
+    });
 
-    auto install_sendrecv_handler =
-        [sample_rate = sample_rate_](const std::shared_ptr<P2PPeer> &target,
-                                     const std::shared_ptr<rtc::Track> &track) {
-            target->rtp_config = std::make_shared<rtc::RtpPacketizationConfig>(
-                target->audio_ssrc, "audio", 109, sample_rate);
-            auto handler = std::make_shared<rtc::OpusRtpPacketizer>(target->rtp_config);
-            handler->addToChain(std::make_shared<rtc::OpusRtpDepacketizer>());
-            handler->addToChain(std::make_shared<rtc::RtcpReceivingSession>());
-            handler->addToChain(std::make_shared<rtc::RtcpSrReporter>(target->rtp_config));
-            track->setMediaHandler(handler);
-            target->audio_track = track;
-        };
+    auto install_sendrecv_handler = [sample_rate =
+                                         sample_rate_](const std::shared_ptr<P2PPeer> &target,
+                                                       const std::shared_ptr<rtc::Track> &track) {
+        target->rtp_config = std::make_shared<rtc::RtpPacketizationConfig>(
+            target->audio_ssrc, "audio", 109, sample_rate);
+        auto handler = std::make_shared<rtc::OpusRtpPacketizer>(target->rtp_config);
+        handler->addToChain(std::make_shared<rtc::OpusRtpDepacketizer>());
+        handler->addToChain(std::make_shared<rtc::RtcpReceivingSession>());
+        handler->addToChain(std::make_shared<rtc::RtcpSrReporter>(target->rtp_config));
+        track->setMediaHandler(handler);
+        target->audio_track = track;
+    };
 
     if (!peer->is_polite) {
         rtc::Description::Audio audio("audio", rtc::Description::Direction::SendRecv);
@@ -1079,22 +1076,20 @@ bool P2PSession::setupWebRtc(const std::shared_ptr<P2PPeer> &peer) {
                     auto session = weak_session.lock();
                     auto locked_peer = weak_peer.lock();
                     if (session && locked_peer && locked_peer->active) {
-                        session->log(P2P_LOG_NORMAL,
-                                     "Remote H264 video track open for peer %s",
+                        session->log(P2P_LOG_NORMAL, "Remote H264 video track open for peer %s",
                                      locked_peer->peer_id.c_str());
                     }
                 });
             }
         }
 #endif
-        peer->audio_track->onFrame(
-            [weak_session, weak_peer](rtc::binary data, rtc::FrameInfo) {
-                auto session = weak_session.lock();
-                auto locked_peer = weak_peer.lock();
-                if (session && locked_peer && locked_peer->active) {
-                    session->decodeAudio(locked_peer, data);
-                }
-            });
+        peer->audio_track->onFrame([weak_session, weak_peer](rtc::binary data, rtc::FrameInfo) {
+            auto session = weak_session.lock();
+            auto locked_peer = weak_peer.lock();
+            if (session && locked_peer && locked_peer->active) {
+                session->decodeAudio(locked_peer, data);
+            }
+        });
     }
 
     peer->pc->onTrack(
@@ -1124,20 +1119,18 @@ bool P2PSession::setupWebRtc(const std::shared_ptr<P2PPeer> &peer) {
                 auto handler = std::make_shared<rtc::H264RtpDepacketizer>();
                 handler->addToChain(std::make_shared<rtc::RtcpReceivingSession>());
                 track->setMediaHandler(handler);
-                track->onFrame(
-                    [weak_session, weak_peer](rtc::binary data, rtc::FrameInfo) {
-                        auto frame_session = weak_session.lock();
-                        auto frame_peer = weak_peer.lock();
-                        if (frame_session && frame_peer && frame_peer->active) {
-                            frame_session->decodeVideoFrame(frame_peer, data);
-                        }
-                    });
+                track->onFrame([weak_session, weak_peer](rtc::binary data, rtc::FrameInfo) {
+                    auto frame_session = weak_session.lock();
+                    auto frame_peer = weak_peer.lock();
+                    if (frame_session && frame_peer && frame_peer->active) {
+                        frame_session->decodeVideoFrame(frame_peer, data);
+                    }
+                });
                 track->onOpen([weak_session, weak_peer]() {
                     auto open_session = weak_session.lock();
                     auto open_peer = weak_peer.lock();
                     if (open_session && open_peer && open_peer->active) {
-                        open_session->log(P2P_LOG_NORMAL,
-                                          "Remote H264 video active for peer %s",
+                        open_session->log(P2P_LOG_NORMAL, "Remote H264 video active for peer %s",
                                           open_peer->peer_id.c_str());
                     }
                 });
@@ -1176,42 +1169,40 @@ bool P2PSession::setupWebRtc(const std::shared_ptr<P2PPeer> &peer) {
             });
         });
 
-    auto install_data_channel =
-        [weak_session, weak_peer](const std::shared_ptr<rtc::DataChannel> &channel) {
-            auto session = weak_session.lock();
-            auto locked_peer = weak_peer.lock();
-            if (!session || !locked_peer || !locked_peer->active) {
-                channel->close();
+    auto install_data_channel = [weak_session,
+                                 weak_peer](const std::shared_ptr<rtc::DataChannel> &channel) {
+        auto session = weak_session.lock();
+        auto locked_peer = weak_peer.lock();
+        if (!session || !locked_peer || !locked_peer->active) {
+            channel->close();
+            return;
+        }
+        locked_peer->dc = channel;
+        channel->onOpen([weak_session, weak_peer]() {
+            auto open_session = weak_session.lock();
+            auto open_peer = weak_peer.lock();
+            if (open_session && open_peer && open_peer->active) {
+                open_session->log(P2P_LOG_DEBUG, "DataChannel open with peer '%s'",
+                                  open_peer->username.c_str());
+            }
+        });
+        channel->onMessage([weak_session, weak_peer](std::variant<rtc::binary, std::string> data) {
+            auto message_session = weak_session.lock();
+            auto message_peer = weak_peer.lock();
+            if (!message_session || !message_peer || !message_peer->active) {
                 return;
             }
-            locked_peer->dc = channel;
-            channel->onOpen([weak_session, weak_peer]() {
-                auto open_session = weak_session.lock();
-                auto open_peer = weak_peer.lock();
-                if (open_session && open_peer && open_peer->active) {
-                    open_session->log(P2P_LOG_DEBUG, "DataChannel open with peer '%s'",
-                                      open_peer->username.c_str());
-                }
-            });
-            channel->onMessage(
-                [weak_session, weak_peer](std::variant<rtc::binary, std::string> data) {
-                    auto message_session = weak_session.lock();
-                    auto message_peer = weak_peer.lock();
-                    if (!message_session || !message_peer || !message_peer->active) {
-                        return;
-                    }
-                    std::string payload;
-                    if (std::holds_alternative<std::string>(data)) {
-                        payload = std::get<std::string>(std::move(data));
-                    } else {
-                        const auto &binary = std::get<rtc::binary>(data);
-                        payload.assign(reinterpret_cast<const char *>(binary.data()),
-                                       binary.size());
-                    }
-                    message_session->emit(
-                        {P2PEventType::Message, message_peer->username, std::move(payload)});
-                });
-        };
+            std::string payload;
+            if (std::holds_alternative<std::string>(data)) {
+                payload = std::get<std::string>(std::move(data));
+            } else {
+                const auto &binary = std::get<rtc::binary>(data);
+                payload.assign(reinterpret_cast<const char *>(binary.data()), binary.size());
+            }
+            message_session->emit(
+                {P2PEventType::Message, message_peer->username, std::move(payload)});
+        });
+    };
     if (!peer->is_polite) {
         install_data_channel(peer->pc->createDataChannel("data"));
     } else {
@@ -1227,16 +1218,14 @@ bool P2PSession::initializeVideoDecoder(const std::shared_ptr<P2PPeer> &peer) {
         return true;
     }
     peer->video_codec = avcodec_find_decoder(AV_CODEC_ID_H264);
-    peer->video_decoder =
-        peer->video_codec ? avcodec_alloc_context3(peer->video_codec) : nullptr;
+    peer->video_decoder = peer->video_codec ? avcodec_alloc_context3(peer->video_codec) : nullptr;
     peer->video_frame = av_frame_alloc();
     peer->rgba_frame = av_frame_alloc();
     return peer->video_decoder && peer->video_frame && peer->rgba_frame &&
            avcodec_open2(peer->video_decoder, peer->video_codec, nullptr) >= 0;
 }
 
-void P2PSession::decodeVideoFrame(const std::shared_ptr<P2PPeer> &peer,
-                                  const rtc::binary &data) {
+void P2PSession::decodeVideoFrame(const std::shared_ptr<P2PPeer> &peer, const rtc::binary &data) {
     std::lock_guard<std::mutex> lock(peer->video_mutex);
     if (!peer->video_decoder) {
         return;
@@ -1278,10 +1267,10 @@ void P2PSession::decodeVideoFrame(const std::shared_ptr<P2PPeer> &peer,
         const int width = peer->video_frame->width;
         const int height = peer->video_frame->height;
         peer->rgba_pixels.resize(static_cast<size_t>(width) * height * 4);
-        peer->video_scaler = sws_getCachedContext(
-            peer->video_scaler, width, height,
-            static_cast<AVPixelFormat>(peer->video_frame->format), width, height,
-            AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+        peer->video_scaler =
+            sws_getCachedContext(peer->video_scaler, width, height,
+                                 static_cast<AVPixelFormat>(peer->video_frame->format), width,
+                                 height, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
         if (!peer->video_scaler) {
             return;
         }

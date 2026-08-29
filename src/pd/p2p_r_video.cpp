@@ -1,5 +1,3 @@
-#include "PdFrontends.hpp"
-
 #include "P2PSession.hpp"
 #include "P2PSessionRegistry.hpp"
 
@@ -38,8 +36,8 @@ struct P2PRVideo {
 };
 
 #ifdef P2P_VIDEO
-static void p2p_r_video_output_info(P2PRVideo *object, int width, int height,
-                                    const char *codec, const char *pixel_format) {
+static void p2p_r_video_output_info(P2PRVideo *object, int width, int height, const char *codec,
+                                    const char *pixel_format) {
     t_atom resolution[2];
     SETFLOAT(resolution, width);
     SETFLOAT(resolution + 1, height);
@@ -198,10 +196,10 @@ static void p2p_r_video_free(P2PRVideo *object) {
 }
 
 // ─────────────────────────────────────
-void p2p_r_video_setup() {
-    p2p_r_video_class = class_new(gensym("p2p.r.video"), reinterpret_cast<t_newmethod>(p2p_r_video_new),
-                                  reinterpret_cast<t_method>(p2p_r_video_free), sizeof(P2PRVideo),
-                                  CLASS_DEFAULT, A_GIMME, 0);
+extern "C" void setup_p2p0x2er0x2evideo() {
+    p2p_r_video_class = class_new(
+        gensym("p2p.r.video"), reinterpret_cast<t_newmethod>(p2p_r_video_new),
+        reinterpret_cast<t_method>(p2p_r_video_free), sizeof(P2PRVideo), CLASS_DEFAULT, A_GIMME, 0);
     class_addmethod(p2p_r_video_class, reinterpret_cast<t_method>(p2p_r_video_gem_state),
                     gensym("gem_state"), A_GIMME, 0);
 }

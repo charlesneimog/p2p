@@ -16,9 +16,10 @@ struct DispatchReceiver {
 };
 
 // ─────────────────────────────────────
-// TODO: Try to avoid global
 t_class *dispatch_class = nullptr;
 t_pd *dispatch_receiver = nullptr;
+
+// TODO: Try to avoid global
 std::mutex dispatch_mutex;
 
 // ─────────────────────────────────────

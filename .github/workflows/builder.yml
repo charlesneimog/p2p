@@ -15,11 +15,16 @@ permissions:
     contents: write
 jobs:
     macos:
-        runs-on: ${{ matrix.machines }}
+        runs-on: ${{ matrix.runner }}
         strategy:
             matrix:
-                precision: [32]
-                machines: [macos-latest]
+                include:
+                    - runner: macos-latest
+                      arch: arm64
+                      precision: 32
+                    - runner: macos-15-intel
+                      arch: x86_64
+                      precision: 32
         steps:
             - uses: actions/checkout@v4
               with:
@@ -39,22 +44,73 @@ jobs:
                     -DPD_FLOATSIZE=${{ matrix.precision }} \
                     -DPD_LIB_DIR=./ \
                     -DCMAKE_BUILD_TYPE=Release \
-                    -DCMAKE_OSX_ARCHITECTURES="arm64" \
+                    -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
                     -DBOOST_ROOT=$(brew --prefix boost) \
                     -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include
                   cmake --build build --parallel
-                  find build -name "*.so" -exec otool -L {} \;
+            - name: Verify macOS architecture
+              run: |
+                  mach_o_count=0
+                  while IFS= read -r -d '' binary; do
+                    if file "$binary" | grep -q 'Mach-O'; then
+                      lipo "$binary" -verify_arch ${{ matrix.arch }}
+                      mach_o_count=$((mach_o_count + 1))
+                    fi
+                  done < <(find build/${{ env.LIBNAME }} build/${{ env.LIBNAME }}-max-package -type f -print0)
+                  test "$mach_o_count" -gt 0
             - name: Upload Pure Data package
               uses: actions/upload-artifact@v4
               with:
-                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-pd${{ matrix.precision }}-${{ matrix.machines }}
+                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-pd${{ matrix.precision }}-macos-${{ matrix.arch }}
                   path: build/${{env.LIBNAME}}
+                  if-no-files-found: error
             - name: Upload Max package
               uses: actions/upload-artifact@v4
               with:
-                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-max-${{ matrix.machines }}
+                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-max-macos-${{ matrix.arch }}
                   path: build/${{ env.LIBNAME }}-max-package
                   if-no-files-found: error
+
+    macos-universal:
+        needs: macos
+        runs-on: macos-latest
+        steps:
+            - name: Download macOS Max slices
+              uses: actions/download-artifact@v4
+              with:
+                  pattern: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-max-macos-*
+                  path: max-slices
+
+            - name: Create universal Max package
+              run: |
+                  arm_dir="max-slices/${LIBNAME}-${LIBVERSION}-max-macos-arm64"
+                  intel_dir="max-slices/${LIBNAME}-${LIBVERSION}-max-macos-x86_64"
+                  package_dir="universal/${LIBNAME}-max-package"
+                  test -d "$arm_dir"
+                  test -d "$intel_dir"
+                  ditto "$arm_dir" "$package_dir"
+
+                  mach_o_count=0
+                  while IFS= read -r -d '' binary; do
+                    if file "$binary" | grep -q 'Mach-O'; then
+                      relative_path="${binary#"$package_dir"/}"
+                      intel_binary="$intel_dir/$relative_path"
+                      test -f "$intel_binary"
+                      lipo -create "$binary" "$intel_binary" -output "$binary.universal"
+                      mv "$binary.universal" "$binary"
+                      lipo "$binary" -verify_arch arm64 x86_64
+                      mach_o_count=$((mach_o_count + 1))
+                    fi
+                  done < <(find "$package_dir" -type f -print0)
+                  test "$mach_o_count" -gt 0
+
+            - name: Upload universal Max package
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-max-macos-universal
+                  path: universal/${{ env.LIBNAME }}-max-package
+                  if-no-files-found: error
+
     linux:
         runs-on: ubuntu-latest
         strategy:
@@ -153,7 +209,7 @@ jobs:
         if: ${{ inputs.publish_release }}
         permissions:
             contents: write
-        needs: [macos, linux, windows]
+        needs: [macos, macos-universal, linux, windows]
         runs-on: ubuntu-latest
         steps:
             - name: Download Pure Data artifacts
@@ -163,11 +219,17 @@ jobs:
                   merge-multiple: true
                   path: release/pd/${{ env.LIBNAME }}
 
-            - name: Download Max artifacts
+            - name: Download Windows Max artifacts
               uses: actions/download-artifact@v4
               with:
-                  pattern: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-max-*
+                  pattern: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-max-windows-*
                   merge-multiple: true
+                  path: release/max/${{ env.LIBNAME }}
+
+            - name: Download universal macOS Max artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: ${{ env.LIBNAME }}-${{ env.LIBVERSION }}-max-macos-universal
                   path: release/max/${{ env.LIBNAME }}
 
             - name: Verify release contents

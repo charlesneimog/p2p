@@ -1,5 +1,3 @@
-#include "PdFrontends.hpp"
-
 #include "P2PSession.hpp"
 #include "P2PSessionRegistry.hpp"
 
@@ -157,7 +155,7 @@ static void p2p_r_audio_free(P2PRAudio *object) {
     delete object->session_id;
 }
 
-void p2p_r_audio_setup() {
+extern "C" void setup_p2p0x2er0x2eaudio_tilde() {
     p2p_r_audio_class = class_new(
         gensym("p2p.r.audio~"), reinterpret_cast<t_newmethod>(p2p_r_audio_new),
         reinterpret_cast<t_method>(p2p_r_audio_free), sizeof(P2PRAudio), CLASS_DEFAULT, A_GIMME, 0);
