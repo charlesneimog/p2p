@@ -170,15 +170,29 @@ set(P2P_PD_SOURCES
     # "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_video.cpp"
 )
 
-pd_add_external(p2p.config "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_config.cpp")
-pd_add_external(p2p.s.audio~ "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_s_audio.cpp")
-pd_add_external(p2p.r.audio~ "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_audio.cpp")
-pd_add_external(p2p.r.video "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_video.cpp")
+# Pd and Max expose the same object names, but CMake target names are global.
+# Keep distinct internal names while pd.cmake preserves the public filenames.
+pd_add_external(
+    p2p.config
+    "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_config.cpp"
+    TARGET p2p_pd_config)
+pd_add_external(
+    p2p.s.audio~
+    "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_s_audio.cpp"
+    TARGET p2p_pd_s_audio)
+pd_add_external(
+    p2p.r.audio~
+    "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_audio.cpp"
+    TARGET p2p_pd_r_audio)
+pd_add_external(
+    p2p.r.video
+    "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_video.cpp"
+    TARGET p2p_pd_r_video)
 
-pd_add_datafile(p2p.config "${CMAKE_CURRENT_SOURCE_DIR}/p2p-help.pd")
-pd_add_datafile(p2p.config "${CMAKE_CURRENT_SOURCE_DIR}/puredata")
-pd_add_datafile(p2p.config "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
-pd_add_datafile(p2p.config "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/p2p-help.pd")
+pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/puredata")
+pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 file(
     GLOB
@@ -189,19 +203,19 @@ file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p/*.hpp")
 
-pd_add_datafile(p2p.config "${P2P_PD_DATAFILES}")
+pd_add_datafile(p2p_pd_config "${P2P_PD_DATAFILES}")
 
 target_include_directories(p2p_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/pd")
 
-target_link_libraries(p2p.config PRIVATE p2p_core)
-target_link_libraries(p2p.r.audio_tilde PRIVATE p2p_core)
-target_link_libraries(p2p.s.audio_tilde PRIVATE p2p_core)
-target_link_libraries(p2p.r.video PRIVATE p2p_core)
-target_include_directories(p2p.r.video PRIVATE "${GEM_GENERATED_INCLUDE_DIR}" "${Gem_SOURCE_DIR}/src")
+target_link_libraries(p2p_pd_config PRIVATE p2p_core)
+target_link_libraries(p2p_pd_r_audio PRIVATE p2p_core)
+target_link_libraries(p2p_pd_s_audio PRIVATE p2p_core)
+target_link_libraries(p2p_pd_r_video PRIVATE p2p_core)
+target_include_directories(p2p_pd_r_video PRIVATE "${GEM_GENERATED_INCLUDE_DIR}" "${Gem_SOURCE_DIR}/src")
 # Pd does not guarantee that symbols from the separately loaded Gem external are globally visible. Compile the image ABI
 # used by pixBlock into p2p~ so loading does not depend on Gem's dlopen visibility or load order.
 target_sources(
-    p2p.r.video
+    p2p_pd_r_video
     PRIVATE "${Gem_SOURCE_DIR}/src/Gem/Image.cpp"
             "${Gem_SOURCE_DIR}/src/Gem/PixConvert.cpp"
             "${Gem_SOURCE_DIR}/src/Gem/PixConvertAltivec.cpp"
@@ -214,9 +228,9 @@ endif()
 foreach(
     P2P_TARGET
     p2p_core
-    p2p.r.video
-    p2p.r.audio_tilde
-    p2p.s.audio_tilde)
+    p2p_pd_r_video
+    p2p_pd_r_audio
+    p2p_pd_s_audio)
     target_compile_options(
         ${P2P_TARGET}
         PRIVATE $<$<CONFIG:Release>:
