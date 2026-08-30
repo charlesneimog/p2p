@@ -251,11 +251,6 @@ endforeach()
 
 set_target_properties(opus PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(p2p_core PRIVATE -g)
-    target_compile_options(p2p PRIVATE -g)
-endif()
-
 # ╭──────────────────────────────────────╮
 # │              Max/Jitter              │
 # ╰──────────────────────────────────────╯

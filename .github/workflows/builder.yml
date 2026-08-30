@@ -3,6 +3,14 @@ name: Build and publish Pure Data and Max packages
 on:
     workflow_dispatch:
         inputs:
+            build_type:
+                description: CMake build type
+                required: true
+                type: choice
+                options:
+                    - Debug
+                    - Release
+                default: Debug
             publish_release:
                 description: Publish a GitHub Release using LIBVERSION after build
                 required: false
@@ -11,6 +19,7 @@ on:
 env:
     LIBNAME: p2p
     LIBVERSION: "0.1.0"
+    BUILD_TYPE: ${{ inputs.build_type }}
 permissions:
     contents: write
 jobs:
@@ -43,7 +52,7 @@ jobs:
                     -DP2P_BUILD_MAX=ON \
                     -DPD_FLOATSIZE=${{ matrix.precision }} \
                     -DPD_LIB_DIR=./ \
-                    -DCMAKE_BUILD_TYPE=Release \
+                    -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
                     -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
                     -DBOOST_ROOT=$(brew --prefix boost) \
                     -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include
@@ -133,17 +142,17 @@ jobs:
               run: |
                   sudo apt install gcc-aarch64-linux-gnu -y
                   sudo apt install g++-aarch64-linux-gnu -y
-                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
             - name: Install arm gcc
               if: matrix.arch == 'arm'
               run: |
                   sudo apt install gcc-arm-linux-gnueabihf -y
                   sudo apt install g++-arm-linux-gnueabihf -y
-                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++
+                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++
             - name: Configure
               if: matrix.arch == 'amd64'
               run: |
-                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=Release
+                  cmake . -B build -DPD_FLOATSIZE=${{ matrix.precision }} -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DPD_LIB_DIR=./ -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
             - name: Build Object
               run: |
                   cmake --build build -- -j$(nproc)
@@ -189,7 +198,7 @@ jobs:
                     -DPD_FLOATSIZE=${{ matrix.precision }} \
                     -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} \
                     -DPD_LIB_DIR=./ \
-                    -DCMAKE_BUILD_TYPE=Release \
+                    -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
                     -DCMAKE_C_COMPILER=/mingw64/bin/gcc.exe \
                     -DCMAKE_CXX_COMPILER=/mingw64/bin/g++.exe
                   cmake --build build --parallel
