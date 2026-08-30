@@ -10,6 +10,10 @@
 #include <stdexcept>
 #include <variant>
 
+#ifdef __APPLE__
+#include <dlfcn.h>
+#endif
+
 #include <spdlog/spdlog.h>
 
 using json = nlohmann::json;
@@ -42,6 +46,20 @@ std::string formatMessage(const char *format, va_list arguments) {
     return buffer;
 }
 
+void initializeRtcLogger() {
+    static std::once_flag once;
+    std::call_once(once, []() {
+        rtc::InitLogger(rtc::LogLevel::Warning,
+                        [](rtc::LogLevel level, std::string message) {
+                            if (level == rtc::LogLevel::Fatal || level == rtc::LogLevel::Error) {
+                                spdlog::error("[libdatachannel] {}", message);
+                            } else {
+                                spdlog::warn("[libdatachannel] {}", message);
+                            }
+                        });
+    });
+}
+
 bool isReadableRegularFile(const std::string &path) {
     std::error_code error;
     if (path.empty() || !std::filesystem::is_regular_file(path, error) || error) {
@@ -56,6 +74,31 @@ struct CaBundleResolution {
     std::string error;
 };
 
+std::string resolveBundledCaBundle() {
+#ifdef __APPLE__
+    Dl_info module_info{};
+    if (dladdr(reinterpret_cast<const void *>(&resolveBundledCaBundle), &module_info) == 0 ||
+        !module_info.dli_fname) {
+        return {};
+    }
+
+    auto directory = std::filesystem::path(module_info.dli_fname).parent_path();
+    for (int depth = 0; depth < 8 && !directory.empty(); ++depth) {
+        const auto candidate = directory / "p2p-ca-bundle.pem";
+        if (isReadableRegularFile(candidate.string())) {
+            return candidate.string();
+        }
+
+        const auto parent = directory.parent_path();
+        if (parent == directory) {
+            break;
+        }
+        directory = parent;
+    }
+#endif
+    return {};
+}
+
 CaBundleResolution resolveCaBundle() {
     if (const char *environment_path = std::getenv("SSL_CERT_FILE");
         environment_path && environment_path[0]) {
@@ -65,6 +108,13 @@ CaBundleResolution resolveCaBundle() {
         return {{},
                 std::string("SSL_CERT_FILE does not name a readable CA bundle: '") +
                     environment_path + "'"};
+    }
+
+    // The macOS package contains roots exported from Apple's System Root
+    // Keychain at build time. Static OpenSSL does not read Keychain trust
+    // directly, and /etc/ssl/cert.pem is not a reliable substitute.
+    if (const auto bundled_path = resolveBundledCaBundle(); !bundled_path.empty()) {
+        return {bundled_path, {}};
     }
 
     // OpenSSL built into this external may have a prefix which differs from the
@@ -103,6 +153,7 @@ P2PSession::P2PSession(std::string id, int sample_rate, MainThreadDispatcher dis
       main_thread_dispatcher_(std::move(dispatcher)) {}
 
 void P2PSession::initialize() {
+    initializeRtcLogger();
     rebuildRealtimePeersLocked();
     if (sample_rate_ != 48000) {
         available_ = false;
@@ -195,7 +246,10 @@ void P2PSession::connect(const std::string &websocket_url, const std::string &ro
                 return;
             }
             rtc::WebSocket::Configuration configuration;
-            configuration.connectionTimeout = std::chrono::milliseconds(1500);
+            // libdatachannel tries resolved addresses sequentially. Its 30-second
+            // default leaves enough time to fall back from a broken IPv6 route to
+            // IPv4 and to complete the TLS handshake on slower networks.
+            configuration.connectionTimeout = std::chrono::seconds(30);
             if (!ca_bundle.path.empty()) {
                 configuration.caCertificatePemFile = ca_bundle.path;
             }
@@ -269,12 +323,13 @@ void P2PSession::installWebSocketCallbacks() {
                     ca_bundle = session->websocket_ca_bundle_;
                 }
                 if (!ca_bundle.empty()) {
-                    session->error("WebSocket error: TLS connection failed "
-                                   "(CA bundle: '%s')",
+                    session->error("WebSocket TLS handshake failed while using CA bundle '%s'; "
+                                   "see the preceding [libdatachannel] error",
                                    ca_bundle.c_str());
                 } else {
-                    session->error("WebSocket error: TLS connection failed; no system CA "
-                                   "bundle was detected (set SSL_CERT_FILE)");
+                    session->error("WebSocket TLS handshake failed; see the preceding "
+                                   "[libdatachannel] error (no CA bundle was detected; "
+                                   "SSL_CERT_FILE can override it)");
                 }
             } else {
                 session->error("WebSocket error: %s", message.c_str());

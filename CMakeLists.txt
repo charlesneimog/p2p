@@ -9,6 +9,30 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(BUILD_SHARED_LIBS OFF)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
 set(NO_WERROR ON)
+
+# The packaged OpenSSL is static and cannot read macOS Keychain trust directly.
+# Export Apple's system roots and ship them beside the Pd and Max packages.
+set(P2P_MACOS_CA_BUNDLE "")
+if(APPLE)
+    set(P2P_MACOS_CA_BUNDLE "${CMAKE_BINARY_DIR}/p2p-ca-bundle.pem")
+    execute_process(
+        COMMAND
+            /usr/bin/security find-certificate -a -p
+            /System/Library/Keychains/SystemRootCertificates.keychain
+        OUTPUT_FILE "${P2P_MACOS_CA_BUNDLE}"
+        ERROR_VARIABLE P2P_MACOS_CA_ERROR
+        RESULT_VARIABLE P2P_MACOS_CA_RESULT)
+    set(P2P_MACOS_CA_SIZE 0)
+    if(EXISTS "${P2P_MACOS_CA_BUNDLE}")
+        file(SIZE "${P2P_MACOS_CA_BUNDLE}" P2P_MACOS_CA_SIZE)
+    endif()
+    if(NOT P2P_MACOS_CA_RESULT EQUAL 0 OR P2P_MACOS_CA_SIZE EQUAL 0)
+        message(WARNING "Could not export the macOS system CA bundle: ${P2P_MACOS_CA_ERROR}")
+        file(REMOVE "${P2P_MACOS_CA_BUNDLE}")
+        set(P2P_MACOS_CA_BUNDLE "")
+    endif()
+endif()
+
 # These names are libdatachannel's public cache options. Force them before CPM adds the dependency so an older build
 # directory cannot retain its defaults and unexpectedly build example executables.
 set(NO_TESTS
@@ -193,6 +217,9 @@ pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/p2p-help.pd")
 pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/puredata")
 pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+if(P2P_MACOS_CA_BUNDLE)
+    pd_add_datafile(p2p_pd_config "${P2P_MACOS_CA_BUNDLE}")
+endif()
 
 file(
     GLOB
@@ -256,4 +283,9 @@ set_target_properties(opus PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # ╰──────────────────────────────────────╯
 if(P2P_MAX_ENABLED)
     add_subdirectory(max)
+    if(P2P_MACOS_CA_BUNDLE)
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/p2p-max-package")
+        configure_file("${P2P_MACOS_CA_BUNDLE}"
+                       "${CMAKE_BINARY_DIR}/p2p-max-package/p2p-ca-bundle.pem" COPYONLY)
+    endif()
 endif()
