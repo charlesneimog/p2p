@@ -7,151 +7,39 @@
         <link href="https://fonts.googleapis.com" rel="preconnect" />
         <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
         <link
-            href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&amp;display=swap"
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap"
             rel="stylesheet"
         />
         <link
             href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
             rel="stylesheet"
         />
-        <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-        <script id="tailwind-config">
-            tailwind.config = {
-                darkMode: "class",
-                theme: {
-                    extend: {
-                        colors: {
-                            "inverse-on-surface": "#f1f1f1",
-                            "surface-tint": "#5e5e5e",
-                            error: "#ba1a1a",
-                            "on-primary-fixed": "#1b1b1b",
-                            "on-surface": "#1b1b1b",
-                            "inverse-surface": "#303030",
-                            tertiary: "#000000",
-                            "surface-container": "#eeeeee",
-                            secondary: "#5e5e5e",
-                            "surface-variant": "#e2e2e2",
-                            "on-primary": "#ffffff",
-                            "on-background": "#1b1b1b",
-                            "primary-fixed-dim": "#c6c6c6",
-                            "error-container": "#ffdad6",
-                            "tertiary-container": "#1b1b1b",
-                            "on-secondary-fixed-variant": "#464747",
-                            "on-error-container": "#93000a",
-                            "surface-bright": "#f9f9f9",
-                            background: "#f9f9f9",
-                            "surface-container-lowest": "#ffffff",
-                            "on-surface-variant": "#4c4546",
-                            "on-tertiary-fixed-variant": "#474747",
-                            "on-tertiary-container": "#848484",
-                            "secondary-container": "#e1dfdf",
-                            "surface-container-highest": "#e2e2e2",
-                            "on-primary-container": "#848484",
-                            "surface-container-high": "#e8e8e8",
-                            surface: "#f9f9f9",
-                            "tertiary-fixed-dim": "#c6c6c6",
-                            "on-secondary-fixed": "#1b1c1c",
-                            "secondary-fixed": "#e4e2e2",
-                            "on-primary-fixed-variant": "#474747",
-                            "secondary-fixed-dim": "#c7c6c6",
-                            "surface-dim": "#dadada",
-                            "on-error": "#ffffff",
-                            "inverse-primary": "#c6c6c6",
-                            "on-secondary-container": "#636262",
-                            primary: "#000000",
-                            "tertiary-fixed": "#e2e2e2",
-                            outline: "#7e7576",
-                            "surface-container-low": "#f3f3f3",
-                            "primary-container": "#1b1b1b",
-                            "outline-variant": "#cfc4c5",
-                            "on-tertiary": "#ffffff",
-                            "primary-fixed": "#e2e2e2",
-                            "on-tertiary-fixed": "#1b1b1b",
-                            "on-secondary": "#ffffff",
-                        },
-                        borderRadius: {
-                            DEFAULT: "0.125rem",
-                            lg: "0.25rem",
-                            xl: "0.5rem",
-                            full: "0.75rem",
-                        },
-                        spacing: {
-                            gutter: "2rem",
-                            "margin-page": "4rem",
-                            "section-gap": "8rem",
-                            "element-gap": "1rem",
-                            "margin-mobile": "1.5rem",
-                        },
-                        fontFamily: {
-                            "headline-lg-mobile": ["Hanken Grotesk"],
-                            display: ["Hanken Grotesk"],
-                            "headline-md": ["Hanken Grotesk"],
-                            "label-md": ["Hanken Grotesk"],
-                            "body-lg": ["Hanken Grotesk"],
-                            "label-sm": ["Hanken Grotesk"],
-                            "headline-lg": ["Hanken Grotesk"],
-                            "body-md": ["Hanken Grotesk"],
-                        },
-                    },
-                },
-            };
-        </script>
-        <style>
-            .material-symbols-outlined {
-                font-variation-settings:
-                    "FILL" 0,
-                    "wght" 400,
-                    "GRAD" 0,
-                    "opsz" 24;
-            }
-            .material-symbols-outlined[data-weight="fill"] {
-                font-variation-settings:
-                    "FILL" 1,
-                    "wght" 400,
-                    "GRAD" 0,
-                    "opsz" 24;
-            }
-
-            /* Custom Scrollbar for the console */
-            #console-log::-webkit-scrollbar {
-                width: 8px;
-            }
-            #console-log::-webkit-scrollbar-track {
-                background: #303030;
-                border-radius: 4px;
-            }
-            #console-log::-webkit-scrollbar-thumb {
-                background: #5e5e5e;
-                border-radius: 4px;
-            }
-        </style>
+        <link href="https://charlesneimog.github.io/css/output.css" rel="stylesheet" />
     </head>
-    <body
-        class="bg-background text-on-background min-h-screen font-body-md text-body-md antialiased selection:bg-surface-variant selection:text-on-background flex flex-col items-center"
-    >
-        <main class="w-full max-w-[600px] px-margin-mobile md:px-0 py-12 flex flex-col gap-element-gap">
+    <body class="bg-background-light dark:bg-background-dark min-h-screen font-display text-base text-text-light-primary dark:text-text-dark-primary">
+        <main class="w-full max-w-2xl mx-auto p-4 sm:p-6 flex flex-col gap-6">
             <h1
                 class="text-3xl font-bold tracking-tight text-text-light-primary dark:text-text-dark-primary sm:text-4xl"
             >
                 P2P Prototype
             </h1>
             <section
-                class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-6 shadow-sm"
+                class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 sm:p-6 flex flex-col gap-6 shadow-md"
             >
-                <header class="flex flex-col gap-3 pb-6 mb-2 border-b border-outline-variant w-full">
-                    <p class="font-body-md text-body-md text-secondary max-w-prose">
+                <header class="flex flex-col gap-3 pb-6 border-b border-gray-300 dark:border-gray-700 w-full">
+                    <p class="text-base leading-relaxed text-text-light-secondary dark:text-text-dark-secondary">
                         Access this URL on a secondary device (smartphone or desktop) to establish a signaling channel
                         and test the peer-to-peer connection.
                     </p>
-                    <p class="font-body-md text-body-md text-secondary max-w-prose">
+                    <p class="text-base leading-relaxed text-text-light-secondary dark:text-text-dark-secondary">
                         This, by default, will just send audio/video to the other peer, but you can also test data messaging and other scenarios using the buttons below.
                     </p>
                 </header>
-                <div class="flex flex-col sm:flex-row gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="flex-1 flex flex-col gap-2">
-                        <label class="font-label-md text-label-md text-secondary" for="room-name">Room name</label>
+                        <label class="text-sm font-medium text-text-light-secondary dark:text-text-dark-secondary" for="room-name">Room name</label>
                         <input
-                            class="w-full bg-surface-container-low border-b border-outline-variant px-4 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:border-primary focus:bg-surface transition-colors"
+                            class="w-full bg-background-light dark:bg-background-dark border-b border-gray-300 dark:border-gray-700 px-4 py-2 text-base text-text-light-primary dark:text-text-dark-primary placeholder:text-text-light-secondary dark:placeholder:text-text-dark-secondary focus:outline-none focus:border-primary transition-colors"
                             id="room-name"
                             placeholder="Enter room ID"
                             type="text"
@@ -159,9 +47,9 @@
                         />
                     </div>
                     <div class="flex-1 flex flex-col gap-2">
-                        <label class="font-label-md text-label-md text-secondary" for="user-name">User name</label>
+                        <label class="text-sm font-medium text-text-light-secondary dark:text-text-dark-secondary" for="user-name">User name</label>
                         <input
-                            class="w-full bg-surface-container-low border-b border-outline-variant px-4 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:border-primary focus:bg-surface transition-colors"
+                            class="w-full bg-background-light dark:bg-background-dark border-b border-gray-300 dark:border-gray-700 px-4 py-2 text-base text-text-light-primary dark:text-text-dark-primary placeholder:text-text-light-secondary dark:placeholder:text-text-dark-secondary focus:outline-none focus:border-primary transition-colors"
                             id="user-name"
                             placeholder="Enter handle"
                             type="text"
@@ -171,13 +59,13 @@
                 </div>
                 <div class="flex gap-4 items-center">
                     <button
-                        class="bg-primary text-on-primary font-label-md text-label-md px-6 py-2 rounded-lg hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="cursor-pointer bg-black dark:bg-white text-white dark:text-black font-medium text-sm px-5 py-2 rounded-lg hover:opacity-90 transition"
                         id="btn-connect"
                     >
                         Connect
                     </button>
                     <button
-                        class="bg-transparent border border-outline text-outline font-label-md text-label-md px-6 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="cursor-pointer border border-gray-300 dark:border-gray-700 text-text-light-secondary dark:text-text-dark-secondary font-medium text-sm px-5 py-2 rounded-lg hover:text-text-light-primary dark:hover:text-text-dark-primary transition-colors"
                         disabled
                         id="btn-disconnect"
                     >
@@ -185,47 +73,47 @@
                     </button>
                 </div>
                 <div
-                    class="w-full bg-error-container text-on-error-container rounded-lg px-4 py-3 flex items-center gap-3 transition-colors duration-300"
+                    class="w-full bg-amber-500/10 text-red-500 border border-amber-400/40 rounded-lg px-4 py-2 flex items-center gap-3 transition-colors duration-300"
                     id="status-bar"
                 >
                     <span class="material-symbols-outlined" data-icon="cloud_off" id="status-icon">cloud_off</span>
-                    <span class="font-label-md text-label-md" id="status-text">Disconnected</span>
+                    <span class="text-sm font-medium" id="status-text">Disconnected</span>
                 </div>
             </section>
 
             <section
-                class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-4 shadow-sm"
+                class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 sm:p-6 flex flex-col gap-4 shadow-md"
             >
                 <header class="flex justify-between items-center">
-                    <h2 class="font-headline-md text-headline-md text-on-background">Peers</h2>
+                    <h2 class="text-xl font-semibold">Peers</h2>
                     <span
-                        class="font-label-sm text-label-sm text-secondary px-3 py-1 bg-surface-container rounded-full"
+                        class="text-xs font-medium text-text-light-secondary dark:text-text-dark-secondary px-3 py-1 bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-full"
                         id="peer-count"
                         >0 Connected</span
                     >
                 </header>
-                <div class="flex flex-wrap gap-3 min-h-[3rem] items-center" id="peer-list">
-                    <p class="font-body-md text-body-md text-secondary italic w-full text-center" id="peer-placeholder">
+                <div class="flex flex-wrap gap-3 items-center" id="peer-list">
+                    <p class="text-base text-text-light-secondary dark:text-text-dark-secondary italic w-full text-center" id="peer-placeholder">
                         No peers connected
                     </p>
                 </div>
             </section>
 
             <section
-                class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-4 shadow-sm"
+                class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 sm:p-6 flex flex-col gap-4 shadow-md"
             >
                 <header class="flex justify-between items-center">
-                    <h2 class="font-headline-md text-headline-md text-on-background">Audio</h2>
-                    <span class="material-symbols-outlined text-on-surface-variant">mic</span>
+                    <h2 class="text-xl font-semibold">Audio</h2>
+                    <span class="material-symbols-outlined text-text-light-secondary dark:text-text-dark-secondary">mic</span>
                 </header>
-                <p class="font-body-md text-body-md text-secondary w-full text-center" id="audio-placeholder">
+                <p class="text-base leading-relaxed text-text-light-secondary dark:text-text-dark-secondary w-full text-center" id="audio-placeholder">
                         Select one of the following test scenarios to validate audio streaming functionality across peers. Each test will open a new window simulating the respective conditions for sending and receiving audio streams.
                     </p>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
 
                     <div>
                         <button
-                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            class="cursor-pointer w-full border border-gray-300 dark:border-gray-700 text-primary font-medium text-sm px-4 py-2 rounded-lg hover:text-text-light-primary dark:hover:text-text-dark-primary hover:shadow-lg transition"
                             id="audio-test1"
                         >
                             Send
@@ -233,7 +121,7 @@
                     </div>
                     <div>
                         <button
-                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            class="cursor-pointer w-full border border-gray-300 dark:border-gray-700 text-primary font-medium text-sm px-4 py-2 rounded-lg hover:text-text-light-primary dark:hover:text-text-dark-primary hover:shadow-lg transition"
                             id="audio-test2"
                         >
                             Receive
@@ -241,7 +129,7 @@
                     </div>
                     <div>
                         <button
-                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            class="cursor-pointer w-full border border-gray-300 dark:border-gray-700 text-primary font-medium text-sm px-4 py-2 rounded-lg hover:text-text-light-primary dark:hover:text-text-dark-primary hover:shadow-lg transition"
                             id="audio-test3"
                         >
                             Send/Receive
@@ -263,21 +151,21 @@
             </section>
 
             <section
-                class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-4 shadow-sm"
+                class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 sm:p-6 flex flex-col gap-4 shadow-md"
             >
                 <header class="flex justify-between items-center">
-                    <h2 class="font-headline-md text-headline-md text-on-background">Video</h2>
-                    <span class="material-symbols-outlined text-on-surface-variant">videocam</span>
+                    <h2 class="text-xl font-semibold">Video</h2>
+                    <span class="material-symbols-outlined text-text-light-secondary dark:text-text-dark-secondary">videocam</span>
                 </header>
-                <p class="font-body-md text-body-md text-secondary w-full text-center" id="video-placeholder">
+                <p class="text-base leading-relaxed text-text-light-secondary dark:text-text-dark-secondary w-full text-center" id="video-placeholder">
                     Select one of the following test scenarios to validate video streaming functionality across peers.
                     Each test will open a new window simulating the respective conditions for sending and receiving video
                     streams.
                 </p>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     <div>
                         <button
-                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            class="cursor-pointer w-full border border-gray-300 dark:border-gray-700 text-primary font-medium text-sm px-4 py-2 rounded-lg hover:text-text-light-primary dark:hover:text-text-dark-primary hover:shadow-lg transition"
                             id="video-test1"
                         >
                             Send
@@ -285,7 +173,7 @@
                     </div>
                     <div>
                         <button
-                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            class="cursor-pointer w-full border border-gray-300 dark:border-gray-700 text-primary font-medium text-sm px-4 py-2 rounded-lg hover:text-text-light-primary dark:hover:text-text-dark-primary hover:shadow-lg transition"
                             id="video-test2"
                         >
                             Receive
@@ -293,7 +181,7 @@
                     </div>
                     <div>
                         <button
-                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            class="cursor-pointer w-full border border-gray-300 dark:border-gray-700 text-primary font-medium text-sm px-4 py-2 rounded-lg hover:text-text-light-primary dark:hover:text-text-dark-primary hover:shadow-lg transition"
                             id="video-test3"
                         >
                             Send/Receive
@@ -302,7 +190,7 @@
 
                       <div>
                         <button
-                            class="w-full bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all"
+                            class="cursor-pointer w-full border border-gray-300 dark:border-gray-700 text-primary font-medium text-sm px-4 py-2 rounded-lg hover:text-text-light-primary dark:hover:text-text-dark-primary hover:shadow-lg transition"
                             id="video-test4"
                         >
                             Art
@@ -353,14 +241,14 @@
             </section>
 
             <section
-                class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-6 shadow-sm"
+                class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 sm:p-6 flex flex-col gap-6 shadow-md"
             >
                 <header>
-                    <h2 class="font-headline-md text-headline-md text-on-background">Messages</h2>
+                    <h2 class="text-xl font-semibold">Messages</h2>
                 </header>
                 <div class="flex gap-4">
                     <button
-                        class="bg-transparent border border-outline text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container-low active:scale-95 transition-all opacity-50 cursor-not-allowed"
+                        class="cursor-pointer border border-gray-300 dark:border-gray-700 text-text-light-secondary dark:text-text-dark-secondary font-medium text-sm px-4 py-2 rounded-lg hover:text-text-light-primary dark:hover:text-text-dark-primary transition-colors"
                         disabled
                         id="btn-test-msg"
                     >
@@ -368,10 +256,10 @@
                     </button>
                 </div>
                 <div
-                    class="w-full bg-inverse-surface rounded-xl border border-outline-variant p-4 h-64 overflow-y-auto flex flex-col-reverse gap-1 shadow-inner"
+                    class="w-full bg-[#121212] rounded-xl border border-[#3b3b54] p-4 h-84 overflow-y-auto flex flex-col gap-1 shadow-md"
                     id="console-log"
                 >
-                    <div class="text-inverse-on-surface opacity-50 font-label-sm text-label-sm py-1"></div>
+                    <div class="text-text-dark-secondary text-xs py-1"></div>
                 </div>
             </section>
         </main>
@@ -403,14 +291,14 @@
             // Strict DOM Modification
             function addLog(msg, type = "info") {
                 const entry = document.createElement("div");
-                entry.className = "font-mono text-sm py-1 border-b border-[#404040] last:border-0 ";
+                entry.className = "text-sm py-1 border-b border-[#3b3b54] ";
 
                 if (type === "error") {
-                    entry.className += "text-[#ffb4ab] font-medium"; // Error tone for dark surface
+                    entry.className += "text-red-400 font-medium";
                 } else if (type === "success") {
-                    entry.className += "text-[#81c784] font-medium"; // Success tone
+                    entry.className += "text-emerald-400 font-medium";
                 } else {
-                    entry.className += "text-inverse-on-surface";
+                    entry.className += "text-[#EAEAEA]";
                 }
 
                 entry.textContent = `[${new Date().toLocaleTimeString("en-US", { hour12: false })}] ${msg}`;
@@ -421,19 +309,20 @@
                 statusText.textContent = text;
                 // Reset to baseline container classes
                 statusDiv.className =
-                    "w-full rounded-lg px-4 py-3 flex items-center gap-3 transition-colors duration-300 ";
+                    "w-full rounded-lg border px-4 py-2 flex items-center gap-3 transition-colors duration-300 ";
 
                 switch (state) {
                     case "disconnected":
-                        statusDiv.className += "bg-error-container text-on-error-container";
+                        statusDiv.className += "bg-amber-500/10 text-red-500 border-amber-400/40";
                         statusIcon.textContent = "cloud_off";
                         break;
                     case "connecting":
-                        statusDiv.className += "bg-surface-variant text-on-surface-variant animate-pulse";
+                        statusDiv.className +=
+                            "bg-gray-100/50 dark:bg-black/20 text-text-light-secondary dark:text-text-dark-secondary border-gray-300 dark:border-gray-700";
                         statusIcon.textContent = "sync";
                         break;
                     case "connected":
-                        statusDiv.className += " bg-green-600 text-white";
+                        statusDiv.className += "bg-emerald-500/10 text-emerald-400 border-emerald-400/40";
                         statusIcon.textContent = "cloud_done";
                         break;
                 }
@@ -442,7 +331,7 @@
             function renderPeers() {
                 if (!network || network.peers.size === 0) {
                     peersListDiv.innerHTML =
-                        '<p class="font-body-md text-body-md text-secondary w-full text-center py-2 italic" id="peer-placeholder">No peers connected</p>';
+                        '<p class="text-base text-text-light-secondary dark:text-text-dark-secondary w-full text-center py-2 italic" id="peer-placeholder">No peers connected</p>';
                     peerCount.textContent = "0 Connected";
                     return;
                 }
@@ -452,15 +341,13 @@
 
                 for (const [id, peer] of network.peers.entries()) {
                     const isOnline = peer.dc?.readyState === "open";
-                    const statusColor = isOnline ? "bg-[#81c784]" : "bg-error";
+                    const statusColor = isOnline ? "text-emerald-400" : "text-red-500";
 
                     html += `
-                    <div class="flex items-center gap-2 bg-surface-container px-3 py-1.5 rounded-full border border-outline-variant shadow-sm transition-all hover:bg-surface-container-high">
-                        <div class="relative flex items-center justify-center">
-                            <span class="material-symbols-outlined text-[20px] text-on-surface">account_circle</span>
-                            <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${statusColor} border-2 border-surface-container"></span>
-                        </div>
-                        <span class="font-label-md text-on-surface">${peer.name}</span>
+                    <div class="flex items-center gap-2 bg-gray-100/50 dark:bg-black/20 px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700 shadow transition">
+                        <span class="material-symbols-outlined text-xl">account_circle</span>
+                        <span class="${statusColor}">●</span>
+                        <span class="text-sm font-medium">${peer.name}</span>
                     </div>`;
                 }
                 peersListDiv.innerHTML = html;
@@ -469,7 +356,7 @@
             function renderEmptyVideoState() {
                 if (remoteVideos.children.length === 0) {
                     remoteVideos.innerHTML =
-                        '<p class="font-body-md text-body-md text-secondary w-full text-center py-8 italic">No remote video</p>';
+                        '<p class="text-base text-text-light-secondary dark:text-text-dark-secondary w-full text-center py-4 italic">No remote video</p>';
                 }
             }
 
@@ -485,7 +372,7 @@
                     videoEl.playsInline = true;
                     videoEl.controls = true;
                     videoEl.className =
-                        "w-full aspect-video bg-inverse-surface rounded-lg border border-outline-variant object-cover";
+                        "w-full aspect-video bg-[#121212] rounded-lg border border-[#3b3b54]";
                     remoteVideos.appendChild(videoEl);
                 }
                 return videoEl;
@@ -521,7 +408,8 @@
 
                     // Unlock Messaging UI
                     sendMsgBtn.disabled = false;
-                    sendMsgBtn.classList.remove("opacity-50", "cursor-not-allowed");
+                    sendMsgBtn.classList.remove("text-text-light-secondary", "dark:text-text-dark-secondary");
+                    sendMsgBtn.classList.add("text-primary");
 
                     addLog(`Signaling server connected. Hash ID: ${myId.substring(0, 8)}`, "success");
                     renderPeers();
@@ -566,7 +454,8 @@
 
                     // Lock Messaging UI
                     sendMsgBtn.disabled = true;
-                    sendMsgBtn.classList.add("opacity-50", "cursor-not-allowed");
+                    sendMsgBtn.classList.remove("text-primary");
+                    sendMsgBtn.classList.add("text-text-light-secondary", "dark:text-text-dark-secondary");
 
                     if (uiRefreshInterval) clearInterval(uiRefreshInterval);
                     if (localVideo.srcObject) {

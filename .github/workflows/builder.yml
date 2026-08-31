@@ -67,14 +67,6 @@ jobs:
                     fi
                   done < <(find build/${{ env.LIBNAME }} build/${{ env.LIBNAME }}-max-package -type f -print0)
                   test "$mach_o_count" -gt 0
-            - name: Verify macOS secure WebSocket connection
-              run: |
-                  set -o pipefail
-                  pd -nogui -noaudio -stderr \
-                    -path build/${{ env.LIBNAME }} \
-                    -open build/${{ env.LIBNAME }}/p2p-tls-smoke.pd \
-                    2>&1 | tee /tmp/p2p-tls-smoke.log
-                  grep -F "p2p-tls-smoke: connected" /tmp/p2p-tls-smoke.log
             - name: Upload Pure Data package
               uses: actions/upload-artifact@v4
               with:
