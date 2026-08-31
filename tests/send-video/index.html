@@ -4,49 +4,52 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>P2P Send Video Test</title>
-        <link rel="stylesheet" href="../video-test.css" />
+        <link href="https://fonts.googleapis.com" rel="preconnect" />
+        <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
+        <link href="https://charlesneimog.github.io/css/output.css" rel="stylesheet" />
     </head>
-    <body data-video-mode="send" data-video-label="Send Video Test">
-        <main>
-            <header>
-                <h1>Send Video</h1>
+    <body class="bg-background-light dark:bg-background-dark min-h-screen font-display text-base text-text-light-primary dark:text-text-dark-primary" data-video-mode="send" data-video-label="Send Video Test">
+        <main class="w-full max-w-5xl mx-auto p-4 sm:p-6 flex flex-col gap-4">
+            <header class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 shadow-md">
+                <h1 class="text-2xl font-bold tracking-tight">Send Video</h1>
             </header>
 
-            <section class="controls" aria-label="Connection controls">
-                <label>
-                    Room name
-                    <input id="room-name" type="text" value="node-alpha" />
+            <section class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 shadow-md" aria-label="Connection controls">
+                <label class="flex flex-col gap-2 text-sm font-medium text-text-light-secondary dark:text-text-dark-secondary">
+                    <span>Room name</span>
+                    <input class="w-full bg-background-light dark:bg-background-dark border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 text-base text-text-light-primary dark:text-text-dark-primary focus:outline-none focus:border-primary transition-colors" id="room-name" type="text" value="node-alpha" />
                 </label>
-                <label>
-                    User name
-                    <input id="user-name" type="text" />
+                <label class="flex flex-col gap-2 text-sm font-medium text-text-light-secondary dark:text-text-dark-secondary">
+                    <span>User name</span>
+                    <input class="w-full bg-background-light dark:bg-background-dark border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 text-base text-text-light-primary dark:text-text-dark-primary focus:outline-none focus:border-primary transition-colors" id="user-name" type="text" />
                 </label>
-                <button class="primary" id="btn-connect" type="button">Connect</button>
-                <button class="secondary" id="btn-disconnect" type="button" disabled>Disconnect</button>
+                <button class="cursor-pointer bg-black dark:bg-white text-white dark:text-black font-medium text-sm px-5 py-2 rounded-lg hover:opacity-90 transition" id="btn-connect" type="button">Connect</button>
+                <button class="cursor-pointer border border-gray-300 dark:border-gray-700 text-text-light-secondary dark:text-text-dark-secondary font-medium text-sm px-5 py-2 rounded-lg hover:text-text-light-primary dark:hover:text-text-dark-primary transition-colors" id="btn-disconnect" type="button" disabled>Disconnect</button>
             </section>
 
-            <div class="status" id="status">Disconnected</div>
+            <div class="w-full bg-gray-100/50 dark:bg-black/20 text-text-light-secondary dark:text-text-dark-secondary border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-300" id="status">Disconnected</div>
 
-            <section class="grid" aria-label="Video panels">
-                <article class="panel" id="local-panel">
-                    <h2>Local Video</h2>
-                    <p class="muted" id="local-state"></p>
-                    <video id="local-video" autoplay muted playsinline></video>
+            <section class="grid grid-cols-1 md:grid-cols-2 gap-4" aria-label="Video panels">
+                <article class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 flex flex-col gap-4 shadow-md" id="local-panel">
+                    <h2 class="text-xl font-semibold">Local Video</h2>
+                    <p class="text-sm text-text-light-secondary dark:text-text-dark-secondary" id="local-state"></p>
+                    <video class="w-full aspect-video bg-[#121212] rounded-lg border border-[#3b3b54]" id="local-video" autoplay muted playsinline></video>
                 </article>
-                <article class="panel" id="remote-panel">
-                    <h2>Remote Video</h2>
-                    <p class="muted" id="remote-state"></p>
-                    <div class="remote-list" id="remote-list"></div>
+                <article class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 flex flex-col gap-4 shadow-md" id="remote-panel">
+                    <h2 class="text-xl font-semibold">Remote Video</h2>
+                    <p class="text-sm text-text-light-secondary dark:text-text-dark-secondary" id="remote-state"></p>
+                    <div class="grid gap-3" id="remote-list"></div>
                 </article>
             </section>
 
-            <section class="panel" aria-label="Messages">
-                <h2>Messages</h2>
-                <div class="messages">
-                    <input id="message-text" type="text" placeholder="Write a test message" />
-                    <button class="secondary" id="btn-send-message" type="button" disabled>Send</button>
+            <section class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 flex flex-col gap-4 shadow-md" aria-label="Messages">
+                <h2 class="text-xl font-semibold">Messages</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input class="w-full bg-background-light dark:bg-background-dark border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 text-base text-text-light-primary dark:text-text-dark-primary placeholder:text-text-light-secondary dark:placeholder:text-text-dark-secondary focus:outline-none focus:border-primary transition-colors" id="message-text" type="text" placeholder="Write a test message" />
+                    <button class="cursor-pointer border border-gray-300 dark:border-gray-700 text-text-light-secondary dark:text-text-dark-secondary font-medium text-sm px-4 py-2 rounded-lg hover:text-text-light-primary dark:hover:text-text-dark-primary transition-colors" id="btn-send-message" type="button" disabled>Send</button>
                 </div>
-                <div class="log" id="log" aria-label="Connection log"></div>
+                <div class="h-40 overflow-y-auto bg-[#121212] border border-[#3b3b54] rounded-xl p-4 text-sm text-[#EAEAEA] shadow-md" id="log" aria-label="Connection log"></div>
             </section>
         </main>
         <script src="../../p2p.js"></script>

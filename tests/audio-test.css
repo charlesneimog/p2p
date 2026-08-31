@@ -108,7 +108,7 @@ button.secondary {
 }
 
 button:disabled {
-    cursor: not-allowed;
+    cursor: pointer;
     opacity: 0.5;
 }
 

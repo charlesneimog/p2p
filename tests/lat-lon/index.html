@@ -4,48 +4,28 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Send Location</title>
-        <style>
-            body {
-                max-width: 28rem;
-                margin: 3rem auto;
-                padding: 0 1rem;
-                font: 1rem system-ui, sans-serif;
-                color: #222;
-            }
-
-            label,
-            input,
-            button {
-                display: block;
-                width: 100%;
-                box-sizing: border-box;
-            }
-
-            input,
-            button {
-                margin: 0.4rem 0 1rem;
-                padding: 0.7rem;
-                font: inherit;
-            }
-
-            button {
-                cursor: pointer;
-            }
-
-            #status {
-                color: #555;
-            }
-        </style>
+        <link href="https://fonts.googleapis.com" rel="preconnect" />
+        <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
+        <link href="https://charlesneimog.github.io/css/output.css" rel="stylesheet" />
     </head>
-    <body>
-        <h1>Send Location</h1>
+    <body class="bg-background-light dark:bg-background-dark min-h-screen font-display text-base text-text-light-primary dark:text-text-dark-primary">
+        <main class="w-full max-w-md mx-auto p-4 sm:p-6 flex flex-col gap-4">
+            <header class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 shadow-md">
+                <h1 class="text-2xl font-bold tracking-tight">Send Location</h1>
+            </header>
 
-        <label for="room">Room</label>
-        <input id="room" value="node-alpha" />
+            <section class="bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-xl p-4 flex flex-col gap-4 shadow-md">
+                <label class="flex flex-col gap-2 text-sm font-medium text-text-light-secondary dark:text-text-dark-secondary" for="room">
+                    <span>Room</span>
+                    <input class="w-full bg-background-light dark:bg-background-dark border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 text-base text-text-light-primary dark:text-text-dark-primary focus:outline-none focus:border-primary transition-colors" id="room" value="node-alpha" />
+                </label>
 
-        <button id="connect" type="button">Connect and send location</button>
-        <p id="user"></p>
-        <p id="status">Disconnected</p>
+                <button class="cursor-pointer bg-black dark:bg-white text-white dark:text-black font-medium text-sm px-5 py-2 rounded-lg hover:opacity-90 transition" id="connect" type="button">Connect and send location</button>
+                <p class="text-sm text-text-light-secondary dark:text-text-dark-secondary" id="user"></p>
+                <p class="w-full bg-gray-100/50 dark:bg-black/20 text-text-light-secondary dark:text-text-dark-secondary border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 text-sm font-medium" id="status">Disconnected</p>
+            </section>
+        </main>
 
         <script src="../../p2p.js"></script>
         <script>

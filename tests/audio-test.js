@@ -39,13 +39,22 @@ remotePanel.hidden = !canReceiveAudio;
 function addLog(message, type = "info") {
     const line = document.createElement("div");
     line.textContent = `[${new Date().toLocaleTimeString("en-US", { hour12: false })}] ${message}`;
-    line.style.color = type === "error" ? "#ffb4ab" : type === "success" ? "#9ad4aa" : "#f0f0ea";
+    line.className = `text-sm py-1 border-b border-[#3b3b54] ${
+        type === "error" ? "text-red-400 font-medium" : type === "success" ? "text-emerald-400 font-medium" : "text-[#EAEAEA]"
+    }`;
     logEl.prepend(line);
 }
 
 function setStatus(message, state = "idle") {
     statusEl.textContent = message;
-    statusEl.className = `status ${state === "connected" ? "connected" : state === "error" ? "error" : ""}`;
+    const base = "w-full rounded-lg border px-4 py-2 text-sm font-medium transition-colors duration-300 ";
+    statusEl.className =
+        base +
+        (state === "connected"
+            ? "bg-emerald-500/10 text-emerald-400 border-emerald-400/40"
+            : state === "error"
+              ? "bg-amber-500/10 text-red-500 border-amber-400/40"
+              : "bg-gray-100/50 dark:bg-black/20 text-text-light-secondary dark:text-text-dark-secondary border-gray-300 dark:border-gray-700");
 }
 
 function setMessageEnabled(enabled) {
@@ -154,19 +163,24 @@ function ensureRemoteAudio(peerId, peerName) {
     if (remote) return remote;
 
     const node = document.createElement("div");
-    node.className = "remote-peer";
+    node.className =
+        "grid gap-2 p-2 bg-background-light dark:bg-background-dark border border-gray-300 dark:border-gray-700 rounded-lg";
 
     const title = document.createElement("strong");
+    title.className = "text-sm font-semibold";
     title.textContent = peerName || peerId.substring(0, 8);
 
     const audio = document.createElement("audio");
+    audio.className = "w-full";
     audio.autoplay = true;
     audio.controls = true;
     audio.playsInline = true;
 
     const meter = document.createElement("div");
-    meter.className = "meter";
+    meter.className =
+        "h-4 w-full bg-gray-100/50 dark:bg-black/20 border border-gray-300 dark:border-gray-700 rounded-full overflow-hidden";
     const meterFill = document.createElement("span");
+    meterFill.className = "block h-full bg-black dark:bg-white rounded-full transition";
     meter.appendChild(meterFill);
 
     node.append(title, audio, meter);

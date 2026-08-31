@@ -295,7 +295,7 @@ function setP2PStatus(message, isError = false) {
     if (!p2pStatusEl) return;
 
     p2pStatusEl.textContent = message;
-    p2pStatusEl.style.color = isError ? "#ffb4ab" : "rgba(246, 248, 248, 0.8)";
+    p2pStatusEl.className = `min-w-[84px] text-sm ${isError ? "text-red-400" : "text-text-dark-secondary"}`;
 }
 
 // ─────────────────────────────────────

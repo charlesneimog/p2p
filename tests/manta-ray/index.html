@@ -4,193 +4,81 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Wooden Manta Ray Automaton</title>
-    <style>
-      html,
-      body {
-        margin: 0;
-        min-height: 100%;
-        overflow: hidden;
-        background: #030609;
-      }
-
-      canvas {
-        display: block;
-      }
-
-      #manta-canvas {
-        position: fixed;
-        inset: 0;
-        overflow: hidden;
-      }
-
-      .p2p-camera-panel {
-        position: fixed;
-        top: 14px;
-        left: 14px;
-        z-index: 10;
-        display: flex;
-        align-items: flex-start;
-        flex-direction: column;
-        gap: 10px;
-        max-width: calc(100vw - 28px);
-        padding: 8px;
-        color: #f6f8f8;
-        font: 13px/1.25 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: rgba(3, 6, 9, 0.78);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 8px;
-        backdrop-filter: blur(10px);
-      }
-
-      .panel-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        max-width: 100%;
-      }
-
-      .parameter-row {
-        flex-wrap: nowrap;
-      }
-
-      .p2p-camera-panel label {
-        display: grid;
-        gap: 2px;
-        min-width: 112px;
-      }
-
-      .p2p-camera-panel span {
-        color: rgba(246, 248, 248, 0.68);
-        font-size: 11px;
-      }
-
-      .p2p-camera-panel input,
-      .p2p-camera-panel button {
-        height: 30px;
-        color: #f6f8f8;
-        font: inherit;
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.22);
-        border-radius: 6px;
-      }
-
-      .p2p-camera-panel input {
-        width: 136px;
-        padding: 0 8px;
-      }
-
-      .p2p-camera-panel input[type="range"] {
-        width: 126px;
-        padding: 0;
-        accent-color: #6ee7d8;
-      }
-
-      .p2p-camera-panel button {
-        padding: 0 10px;
-        cursor: pointer;
-      }
-
-      .p2p-camera-panel button:disabled {
-        cursor: default;
-        opacity: 0.55;
-      }
-
-      #p2p-status {
-        min-width: 160px;
-        color: rgba(246, 248, 248, 0.8);
-        white-space: nowrap;
-      }
-
-      @media (max-width: 720px) {
-        .panel-row,
-        .parameter-row {
-          align-items: stretch;
-          flex-direction: column;
-        }
-
-        .p2p-camera-panel label,
-        .p2p-camera-panel input,
-        #p2p-status {
-          width: 100%;
-          min-width: 0;
-        }
-
-        .p2p-camera-panel input[type="range"] {
-          width: 100%;
-        }
-      }
-    </style>
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
+    <link href="https://charlesneimog.github.io/css/output.css" rel="stylesheet" />
   </head>
-  <body>
-    <div id="manta-canvas"></div>
-    <div class="p2p-camera-panel">
-      <div class="panel-row">
-        <label>
-          <span>Room</span>
-          <input id="p2p-room" autocomplete="off" />
+  <body class="min-h-screen overflow-hidden bg-[#121212] font-display text-white">
+    <div class="fixed inset-0 overflow-hidden bg-[#121212]" id="manta-canvas"></div>
+    <div class="fixed top-4 right-4 z-50 w-full max-w-2xl max-sm:max-w-[90vw] grid gap-3 p-4 text-sm text-white bg-[#121212] border border-white/10 rounded-xl shadow-lg backdrop-blur-sm">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 items-center">
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Room</span>
+          <input class="h-10 w-full px-2 text-white bg-white/20 border border-white/10 rounded-lg focus:outline-none focus:border-primary" id="p2p-room" autocomplete="off" />
         </label>
-        <label>
-          <span>Name</span>
-          <input id="p2p-name" autocomplete="off" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Name</span>
+          <input class="h-10 w-full px-2 text-white bg-white/20 border border-white/10 rounded-lg focus:outline-none focus:border-primary" id="p2p-name" autocomplete="off" />
         </label>
-        <button id="p2p-connect" type="button">Connect</button>
-        <button id="p2p-disconnect" type="button" disabled>Disconnect</button>
-        <div id="p2p-status">Disconnected</div>
+        <button class="cursor-pointer h-10 px-4 font-medium text-sm text-white bg-white/20 border border-white/10 rounded-lg hover:opacity-90 transition" id="p2p-connect" type="button">Connect</button>
+        <button class="cursor-pointer h-10 px-4 font-medium text-sm text-text-dark-secondary bg-white/20 border border-white/10 rounded-lg hover:opacity-90 transition" id="p2p-disconnect" type="button" disabled>Disconnect</button>
+        <div class="min-w-[84px] text-sm text-text-dark-secondary" id="p2p-status">Disconnected</div>
       </div>
-      <div class="panel-row parameter-row">
-        <label>
-          <span>Line thickness</span>
-          <input id="shape-morph" type="range" min="0" max="35" value="35" />
+      <div class="grid grid-cols-2 lg:grid-cols-3 gap-2 items-center">
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Line thickness</span>
+          <input class="h-10 w-full" id="shape-morph" type="range" min="0" max="35" value="35" />
         </label>
-        <label>
-          <span>Movement</span>
-          <input id="movement-amplitude" type="range" min="0" max="200" value="60" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Movement</span>
+          <input class="h-10 w-full" id="movement-amplitude" type="range" min="0" max="200" value="60" />
         </label>
-        <label>
-          <span>Dispersion</span>
-          <input id="dispersion" type="range" min="0" max="600" value="0" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Dispersion</span>
+          <input class="h-10 w-full" id="dispersion" type="range" min="0" max="600" value="0" />
         </label>
-        <label>
-          <span>Frame random</span>
-          <input id="frame-randomness" type="range" min="0" max="25" value="0" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Frame random</span>
+          <input class="h-10 w-full" id="frame-randomness" type="range" min="0" max="25" value="0" />
         </label>
-        <label>
-          <span>Phase spread</span>
-          <input id="phase-spread" type="range" min="0" max="200" value="200" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Phase spread</span>
+          <input class="h-10 w-full" id="phase-spread" type="range" min="0" max="200" value="200" />
         </label>
-        <label>
-          <span>Length variety</span>
-          <input id="length-variety" type="range" min="0" max="100" value="100" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Length variety</span>
+          <input class="h-10 w-full" id="length-variety" type="range" min="0" max="100" value="100" />
         </label>
       </div>
-      <div class="panel-row parameter-row">
-        <label>
-          <span>Width variety</span>
-          <input id="width-variety" type="range" min="0" max="100" value="100" />
+      <div class="grid grid-cols-2 lg:grid-cols-3 gap-2 items-center">
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Width variety</span>
+          <input class="h-10 w-full" id="width-variety" type="range" min="0" max="100" value="100" />
         </label>
-        <label>
-          <span>Line count</span>
-          <input id="density" type="range" min="0" max="500" value="500" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Line count</span>
+          <input class="h-10 w-full" id="density" type="range" min="0" max="500" value="500" />
         </label>
-        <label>
-          <span>Speed</span>
-          <input id="motion-speed" type="range" min="0" max="250" value="1" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Speed</span>
+          <input class="h-10 w-full" id="motion-speed" type="range" min="0" max="250" value="1" />
         </label>
-        <label>
-          <span>Bend variety</span>
-          <input id="bend-variety" type="range" min="0" max="100" value="100" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Bend variety</span>
+          <input class="h-10 w-full" id="bend-variety" type="range" min="0" max="100" value="100" />
         </label>
-        <label>
-          <span>Depth variety</span>
-          <input id="depth-variety" type="range" min="0" max="100" value="100" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Depth variety</span>
+          <input class="h-10 w-full" id="depth-variety" type="range" min="0" max="100" value="100" />
         </label>
-        <label>
-          <span>3D direction</span>
-          <input id="direction-variety" type="range" min="0" max="100" value="0" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">3D direction</span>
+          <input class="h-10 w-full" id="direction-variety" type="range" min="0" max="100" value="0" />
         </label>
-        <label>
-          <span>Camera scale</span>
-          <input id="camera-scale" type="range" min="45" max="220" value="220" />
+        <label class="grid gap-1 min-w-[84px]">
+          <span class="text-xs text-text-dark-secondary">Camera scale</span>
+          <input class="h-10 w-full" id="camera-scale" type="range" min="45" max="220" value="220" />
         </label>
       </div>
     </div>
