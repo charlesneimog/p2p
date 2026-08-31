@@ -10,29 +10,6 @@ set(BUILD_SHARED_LIBS OFF)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
 set(NO_WERROR ON)
 
-# The packaged OpenSSL is static and cannot read macOS Keychain trust directly.
-# Export Apple's system roots and ship them beside the Pd and Max packages.
-set(P2P_MACOS_CA_BUNDLE "")
-if(APPLE)
-    set(P2P_MACOS_CA_BUNDLE "${CMAKE_BINARY_DIR}/p2p-ca-bundle.pem")
-    execute_process(
-        COMMAND
-            /usr/bin/security find-certificate -a -p
-            /System/Library/Keychains/SystemRootCertificates.keychain
-        OUTPUT_FILE "${P2P_MACOS_CA_BUNDLE}"
-        ERROR_VARIABLE P2P_MACOS_CA_ERROR
-        RESULT_VARIABLE P2P_MACOS_CA_RESULT)
-    set(P2P_MACOS_CA_SIZE 0)
-    if(EXISTS "${P2P_MACOS_CA_BUNDLE}")
-        file(SIZE "${P2P_MACOS_CA_BUNDLE}" P2P_MACOS_CA_SIZE)
-    endif()
-    if(NOT P2P_MACOS_CA_RESULT EQUAL 0 OR P2P_MACOS_CA_SIZE EQUAL 0)
-        message(WARNING "Could not export the macOS system CA bundle: ${P2P_MACOS_CA_ERROR}")
-        file(REMOVE "${P2P_MACOS_CA_BUNDLE}")
-        set(P2P_MACOS_CA_BUNDLE "")
-    endif()
-endif()
-
 # These names are libdatachannel's public cache options. Force them before CPM adds the dependency so an older build
 # directory cannot retain its defaults and unexpectedly build example executables.
 set(NO_TESTS
@@ -127,7 +104,7 @@ cpmaddpackage(
     GITHUB_REPOSITORY
     paullouisageneau/libdatachannel
     GIT_TAG
-    v0.24.3
+    v0.24.5
     OPTIONS
     "USE_NICE OFF"
     "USE_SYSTEM_SRTP OFF"
@@ -187,39 +164,73 @@ target_link_libraries(
     PRIVATE spdlog)
 target_compile_definitions(p2p_core PUBLIC P2P_VIDEO=1)
 set_target_properties(p2p_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(APPLE)
+    find_library(P2P_SECURITY_FRAMEWORK Security REQUIRED)
+    find_library(P2P_CORE_FOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+    target_link_libraries(
+        p2p_core
+        PUBLIC ${P2P_SECURITY_FRAMEWORK} ${P2P_CORE_FOUNDATION_FRAMEWORK})
+endif()
 
-set(P2P_PD_SOURCES
+set(P2P_PD_RUNTIME_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/P2PMainThreadDispatch.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/P2PSessionRegistry.cpp"
     # "${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_video.cpp"
 )
 
+# A flat Mach-O namespace makes every global symbol in separately loaded Pd externals interpose. That is especially
+# unsafe here because every external would otherwise embed its own copy of the session registry, libdatachannel, and
+# OpenSSL. Keep those objects in one runtime dylib on macOS and let the thin Pd externals share it through normal
+# two-level namespace bindings.
+if(APPLE)
+    add_library(p2p_pd_runtime SHARED ${P2P_PD_RUNTIME_SOURCES})
+    target_include_directories(p2p_pd_runtime PRIVATE "${PD_SOURCES_PATH}")
+    target_compile_definitions(p2p_pd_runtime PRIVATE UNIX MACOSX)
+    if(NOT PD_FLOATSIZE EQUAL 32)
+        target_compile_definitions(p2p_pd_runtime PRIVATE PD_FLOATSIZE=${PD_FLOATSIZE})
+    endif()
+    target_link_libraries(p2p_pd_runtime PRIVATE p2p_core)
+    # Pd API symbols are supplied by the host process when the runtime is loaded as a dependency of an external.
+    target_link_options(p2p_pd_runtime PRIVATE -undefined dynamic_lookup)
+    set_target_properties(
+        p2p_pd_runtime
+        PROPERTIES PREFIX ""
+                   OUTPUT_NAME "p2p.runtime"
+                   SUFFIX ".dylib"
+                   POSITION_INDEPENDENT_CODE ON
+                   MACOSX_RPATH ON
+                   BUILD_WITH_INSTALL_NAME_DIR ON
+                   INSTALL_NAME_DIR "@rpath"
+                   BUILD_RPATH "@loader_path"
+                   INSTALL_RPATH "@loader_path")
+    set(P2P_PD_EXTERNAL_COMMON_SOURCES "")
+else()
+    set(P2P_PD_EXTERNAL_COMMON_SOURCES ${P2P_PD_RUNTIME_SOURCES})
+endif()
+
 # Pd and Max expose the same object names, but CMake target names are global.
 # Keep distinct internal names while pd.cmake preserves the public filenames.
 pd_add_external(
     p2p.config
-    "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_config.cpp"
+    "${P2P_PD_EXTERNAL_COMMON_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_config.cpp"
     TARGET p2p_pd_config)
 pd_add_external(
     p2p.s.audio~
-    "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_s_audio.cpp"
+    "${P2P_PD_EXTERNAL_COMMON_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_s_audio.cpp"
     TARGET p2p_pd_s_audio)
 pd_add_external(
     p2p.r.audio~
-    "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_audio.cpp"
+    "${P2P_PD_EXTERNAL_COMMON_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_audio.cpp"
     TARGET p2p_pd_r_audio)
 pd_add_external(
     p2p.r.video
-    "${P2P_PD_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_video.cpp"
+    "${P2P_PD_EXTERNAL_COMMON_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_video.cpp"
     TARGET p2p_pd_r_video)
 
 pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/p2p-help.pd")
 pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/puredata")
 pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
-if(P2P_MACOS_CA_BUNDLE)
-    pd_add_datafile(p2p_pd_config "${P2P_MACOS_CA_BUNDLE}")
-endif()
 
 file(
     GLOB
@@ -234,10 +245,44 @@ pd_add_datafile(p2p_pd_config "${P2P_PD_DATAFILES}")
 
 target_include_directories(p2p_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/pd")
 
-target_link_libraries(p2p_pd_config PRIVATE p2p_core)
-target_link_libraries(p2p_pd_r_audio PRIVATE p2p_core)
-target_link_libraries(p2p_pd_s_audio PRIVATE p2p_core)
-target_link_libraries(p2p_pd_r_video PRIVATE p2p_core)
+if(APPLE)
+    foreach(P2P_PD_TARGET p2p_pd_config p2p_pd_r_audio p2p_pd_s_audio p2p_pd_r_video)
+        target_include_directories(
+            ${P2P_PD_TARGET}
+            PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p"
+                    "${opus_SOURCE_DIR}/include"
+                    "${libdatachannel_SOURCE_DIR}/include")
+        # These are header-only usage requirements exposed by P2PSession.hpp/P2PPeer.hpp. Do not link any of the
+        # corresponding static implementation libraries into the thin externals.
+        target_link_libraries(
+            ${P2P_PD_TARGET}
+            PRIVATE p2p_pd_runtime
+                    nlohmann_json::nlohmann_json
+                    Boost::headers
+                    ffmpeg.avcodec.headers
+                    ffmpeg.swscale.headers
+                    ffmpeg.avutil.headers)
+        target_compile_definitions(${P2P_PD_TARGET} PRIVATE P2P_VIDEO=1)
+        set_target_properties(
+            ${P2P_PD_TARGET}
+            PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
+
+        # pd.cmake currently adds -flat_namespace. Retain dynamic lookup only for Pd's host API; normal two-level
+        # binding ensures the external's other symbols resolve to p2p.runtime instead of another loaded external.
+        get_target_property(P2P_PD_LINK_OPTIONS ${P2P_PD_TARGET} LINK_OPTIONS)
+        if(P2P_PD_LINK_OPTIONS)
+            list(REMOVE_ITEM P2P_PD_LINK_OPTIONS -flat_namespace)
+            set_property(TARGET ${P2P_PD_TARGET} PROPERTY LINK_OPTIONS "${P2P_PD_LINK_OPTIONS}")
+        endif()
+    endforeach()
+    add_dependencies(p2p_pd_config p2p_pd_runtime)
+    pd_add_datafile(p2p_pd_config "$<TARGET_FILE:p2p_pd_runtime>")
+else()
+    target_link_libraries(p2p_pd_config PRIVATE p2p_core)
+    target_link_libraries(p2p_pd_r_audio PRIVATE p2p_core)
+    target_link_libraries(p2p_pd_s_audio PRIVATE p2p_core)
+    target_link_libraries(p2p_pd_r_video PRIVATE p2p_core)
+endif()
 target_include_directories(p2p_pd_r_video PRIVATE "${GEM_GENERATED_INCLUDE_DIR}" "${Gem_SOURCE_DIR}/src")
 # Pd does not guarantee that symbols from the separately loaded Gem external are globally visible. Compile the image ABI
 # used by pixBlock into p2p~ so loading does not depend on Gem's dlopen visibility or load order.
@@ -252,12 +297,11 @@ target_sources(
 if(UNIX)
     target_compile_definitions(p2p_core PUBLIC HAVE_UNISTD_H=1 HAVE_SYS_TIME_H=1 HAVE_SYS_TYPES_H=1)
 endif()
-foreach(
-    P2P_TARGET
-    p2p_core
-    p2p_pd_r_video
-    p2p_pd_r_audio
-    p2p_pd_s_audio)
+set(P2P_OPTIMIZED_TARGETS p2p_core p2p_pd_r_video p2p_pd_r_audio p2p_pd_s_audio)
+if(APPLE)
+    list(APPEND P2P_OPTIMIZED_TARGETS p2p_pd_runtime)
+endif()
+foreach(P2P_TARGET IN LISTS P2P_OPTIMIZED_TARGETS)
     target_compile_options(
         ${P2P_TARGET}
         PRIVATE $<$<CONFIG:Release>:
@@ -283,9 +327,4 @@ set_target_properties(opus PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # ╰──────────────────────────────────────╯
 if(P2P_MAX_ENABLED)
     add_subdirectory(max)
-    if(P2P_MACOS_CA_BUNDLE)
-        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/p2p-max-package")
-        configure_file("${P2P_MACOS_CA_BUNDLE}"
-                       "${CMAKE_BINARY_DIR}/p2p-max-package/p2p-ca-bundle.pem" COPYONLY)
-    endif()
 endif()

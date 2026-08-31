@@ -1,6 +1,7 @@
 #include "P2PSession.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdarg>
 #include <cstdlib>
 #include <cstdio>
@@ -9,9 +10,13 @@
 #include <fstream>
 #include <stdexcept>
 #include <variant>
+#include <vector>
 
 #ifdef __APPLE__
-#include <dlfcn.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 #include <spdlog/spdlog.h>
@@ -74,30 +79,149 @@ struct CaBundleResolution {
     std::string error;
 };
 
-std::string resolveBundledCaBundle() {
 #ifdef __APPLE__
-    Dl_info module_info{};
-    if (dladdr(reinterpret_cast<const void *>(&resolveBundledCaBundle), &module_info) == 0 ||
-        !module_info.dli_fname) {
-        return {};
+bool writePemCertificate(FILE *file, const unsigned char *data, size_t size) {
+    static constexpr char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    if (std::fputs("-----BEGIN CERTIFICATE-----\n", file) == EOF) {
+        return false;
     }
 
-    auto directory = std::filesystem::path(module_info.dli_fname).parent_path();
-    for (int depth = 0; depth < 8 && !directory.empty(); ++depth) {
-        const auto candidate = directory / "p2p-ca-bundle.pem";
-        if (isReadableRegularFile(candidate.string())) {
-            return candidate.string();
+    size_t column = 0;
+    for (size_t offset = 0; offset < size; offset += 3) {
+        const size_t remaining = size - offset;
+        const unsigned int value = static_cast<unsigned int>(data[offset]) << 16 |
+                                   (remaining > 1
+                                        ? static_cast<unsigned int>(data[offset + 1]) << 8
+                                        : 0) |
+                                   (remaining > 2 ? static_cast<unsigned int>(data[offset + 2]) : 0);
+        const char encoded[] = {
+            alphabet[(value >> 18) & 0x3f],
+            alphabet[(value >> 12) & 0x3f],
+            remaining > 1 ? alphabet[(value >> 6) & 0x3f] : '=',
+            remaining > 2 ? alphabet[value & 0x3f] : '=',
+        };
+        for (const char character : encoded) {
+            if (std::fputc(character, file) == EOF) {
+                return false;
+            }
+            if (++column == 64) {
+                if (std::fputc('\n', file) == EOF) {
+                    return false;
+                }
+                column = 0;
+            }
         }
-
-        const auto parent = directory.parent_path();
-        if (parent == directory) {
-            break;
-        }
-        directory = parent;
     }
-#endif
-    return {};
+    if (column != 0 && std::fputc('\n', file) == EOF) {
+        return false;
+    }
+    return std::fputs("-----END CERTIFICATE-----\n", file) != EOF;
 }
+
+CaBundleResolution createMacosCaBundle() {
+    CFArrayRef anchors = nullptr;
+    const OSStatus status = SecTrustCopyAnchorCertificates(&anchors);
+    if (status != errSecSuccess || !anchors) {
+        return {{}, "Could not read macOS Keychain trust anchors (OSStatus " +
+                        std::to_string(status) + ")"};
+    }
+
+    std::string path;
+    std::vector<char> path_buffer;
+    FILE *file = nullptr;
+    int descriptor = -1;
+    bool temporary_file_created = false;
+    try {
+        path = (std::filesystem::temp_directory_path() / "p2p-ca-bundle-XXXXXX").string();
+        path_buffer.assign(path.begin(), path.end());
+        path_buffer.push_back('\0');
+        descriptor = mkstemp(path_buffer.data());
+        if (descriptor < 0) {
+            CFRelease(anchors);
+            return {{}, "Could not create temporary macOS CA bundle: " +
+                            std::string(std::strerror(errno))};
+        }
+        temporary_file_created = true;
+        path = path_buffer.data();
+        fchmod(descriptor, S_IRUSR | S_IWUSR);
+        file = fdopen(descriptor, "w");
+        if (!file) {
+            const std::string error = std::strerror(errno);
+            close(descriptor);
+            descriptor = -1;
+            std::remove(path.c_str());
+            CFRelease(anchors);
+            return {{}, "Could not open temporary macOS CA bundle: " + error};
+        }
+        descriptor = -1; // Owned by file after fdopen succeeds.
+    } catch (const std::exception &exception) {
+        if (descriptor >= 0) {
+            close(descriptor);
+        }
+        if (temporary_file_created) {
+            unlink(path_buffer.data());
+        }
+        CFRelease(anchors);
+        return {{}, "Could not locate the macOS temporary directory: " +
+                        std::string(exception.what())};
+    }
+
+    size_t certificate_count = 0;
+    bool write_succeeded = true;
+    const CFIndex anchor_count = CFArrayGetCount(anchors);
+    for (CFIndex index = 0; index < anchor_count && write_succeeded; ++index) {
+        const auto value = CFArrayGetValueAtIndex(anchors, index);
+        if (!value || CFGetTypeID(value) != SecCertificateGetTypeID()) {
+            continue;
+        }
+        const auto certificate =
+            reinterpret_cast<SecCertificateRef>(const_cast<void *>(value));
+        CFDataRef der = SecCertificateCopyData(certificate);
+        if (!der) {
+            continue;
+        }
+        write_succeeded = writePemCertificate(
+            file, CFDataGetBytePtr(der), static_cast<size_t>(CFDataGetLength(der)));
+        CFRelease(der);
+        if (write_succeeded) {
+            ++certificate_count;
+        }
+    }
+    CFRelease(anchors);
+
+    if (std::fclose(file) != 0) {
+        write_succeeded = false;
+    }
+    if (!write_succeeded || certificate_count == 0) {
+        std::remove(path.c_str());
+        return {{}, "Could not export macOS Keychain trust anchors to a temporary CA bundle"};
+    }
+    return {path, {}};
+}
+
+class MacosCaBundle {
+  public:
+    MacosCaBundle() : resolution_(createMacosCaBundle()) {}
+    ~MacosCaBundle() {
+        if (!resolution_.path.empty()) {
+            std::remove(resolution_.path.c_str());
+        }
+    }
+
+    const CaBundleResolution &resolution() const {
+        return resolution_;
+    }
+
+  private:
+    CaBundleResolution resolution_;
+};
+
+const CaBundleResolution &resolveMacosCaBundle() {
+    static const MacosCaBundle bundle;
+    return bundle.resolution();
+}
+#endif
 
 CaBundleResolution resolveCaBundle() {
     if (const char *environment_path = std::getenv("SSL_CERT_FILE");
@@ -110,13 +234,11 @@ CaBundleResolution resolveCaBundle() {
                     environment_path + "'"};
     }
 
-    // The macOS package contains roots exported from Apple's System Root
-    // Keychain at build time. Static OpenSSL does not read Keychain trust
-    // directly, and /etc/ssl/cert.pem is not a reliable substitute.
-    if (const auto bundled_path = resolveBundledCaBundle(); !bundled_path.empty()) {
-        return {bundled_path, {}};
-    }
-
+#ifdef __APPLE__
+    // Static OpenSSL cannot query Keychain trust itself. Export the current
+    // machine's trusted anchors at runtime instead of shipping a stale snapshot.
+    return resolveMacosCaBundle();
+#else
     // OpenSSL built into this external may have a prefix which differs from the
     // host system. Prefer the host's maintained trust bundle when it exists.
     static constexpr const char *candidate_paths[] = {
@@ -137,6 +259,7 @@ CaBundleResolution resolveCaBundle() {
 
     // Leaving this unset preserves libdatachannel/OpenSSL's default trust lookup.
     return {};
+#endif
 }
 } // namespace
 

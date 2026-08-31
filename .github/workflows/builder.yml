@@ -18,7 +18,7 @@ on:
                 default: false
 env:
     LIBNAME: p2p
-    LIBVERSION: "0.1.0"
+    LIBVERSION: "0.3.0"
     BUILD_TYPE: ${{ inputs.build_type }}
 permissions:
     contents: write

@@ -4,7 +4,7 @@
 #X obj 45 171 print p2p-tls-smoke;
 #X obj 45 42 loadbang;
 #X msg 45 87 connect wss://p2p-signaling.charlesneimog.workers.dev tls-smoke PureData;
-#X obj 434 87 delay 15000;
+#X obj 434 87 delay 3000;
 #X msg 434 129 \; pd quit;
 #X connect 0 0 1 0;
 #X connect 2 0 3 0;
