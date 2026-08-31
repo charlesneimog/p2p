@@ -53,7 +53,12 @@ if(NOT EXISTS "${CPM_FILE}")
 endif()
 include(${CPM_FILE})
 
-find_package(Boost REQUIRED)
+if(EMSCRIPTEN)
+    add_compile_options("--use-port=boost_headers")
+    add_link_options("--use-port=boost_headers")
+else()
+    find_package(Boost REQUIRED)
+endif()
 
 option(P2P_BUILD_MAX "Build the Max/MSP + Jitter object family" ON)
 set(MAX_SDK_PATH
@@ -167,9 +172,7 @@ set_target_properties(p2p_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(APPLE)
     find_library(P2P_SECURITY_FRAMEWORK Security REQUIRED)
     find_library(P2P_CORE_FOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
-    target_link_libraries(
-        p2p_core
-        PUBLIC ${P2P_SECURITY_FRAMEWORK} ${P2P_CORE_FOUNDATION_FRAMEWORK})
+    target_link_libraries(p2p_core PUBLIC ${P2P_SECURITY_FRAMEWORK} ${P2P_CORE_FOUNDATION_FRAMEWORK})
 endif()
 
 set(P2P_PD_RUNTIME_SOURCES
@@ -186,12 +189,19 @@ if(APPLE)
     add_library(p2p_pd_runtime SHARED ${P2P_PD_RUNTIME_SOURCES})
     target_include_directories(p2p_pd_runtime PRIVATE "${PD_SOURCES_PATH}")
     target_compile_definitions(p2p_pd_runtime PRIVATE UNIX MACOSX)
-    if(NOT PD_FLOATSIZE EQUAL 32)
+    if(NOT
+       PD_FLOATSIZE
+       EQUAL
+       32)
         target_compile_definitions(p2p_pd_runtime PRIVATE PD_FLOATSIZE=${PD_FLOATSIZE})
     endif()
     target_link_libraries(p2p_pd_runtime PRIVATE p2p_core)
     # Pd API symbols are supplied by the host process when the runtime is loaded as a dependency of an external.
-    target_link_options(p2p_pd_runtime PRIVATE -undefined dynamic_lookup)
+    target_link_options(
+        p2p_pd_runtime
+        PRIVATE
+        -undefined
+        dynamic_lookup)
     set_target_properties(
         p2p_pd_runtime
         PROPERTIES PREFIX ""
@@ -208,24 +218,28 @@ else()
     set(P2P_PD_EXTERNAL_COMMON_SOURCES ${P2P_PD_RUNTIME_SOURCES})
 endif()
 
-# Pd and Max expose the same object names, but CMake target names are global.
-# Keep distinct internal names while pd.cmake preserves the public filenames.
+# Pd and Max expose the same object names, but CMake target names are global. Keep distinct internal names while
+# pd.cmake preserves the public filenames.
 pd_add_external(
     p2p.config
     "${P2P_PD_EXTERNAL_COMMON_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_config.cpp"
-    TARGET p2p_pd_config)
+    TARGET
+    p2p_pd_config)
 pd_add_external(
     p2p.s.audio~
     "${P2P_PD_EXTERNAL_COMMON_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_s_audio.cpp"
-    TARGET p2p_pd_s_audio)
+    TARGET
+    p2p_pd_s_audio)
 pd_add_external(
     p2p.r.audio~
     "${P2P_PD_EXTERNAL_COMMON_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_audio.cpp"
-    TARGET p2p_pd_r_audio)
+    TARGET
+    p2p_pd_r_audio)
 pd_add_external(
     p2p.r.video
     "${P2P_PD_EXTERNAL_COMMON_SOURCES};${CMAKE_CURRENT_SOURCE_DIR}/src/pd/p2p_r_video.cpp"
-    TARGET p2p_pd_r_video)
+    TARGET
+    p2p_pd_r_video)
 
 pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/p2p-help.pd")
 pd_add_datafile(p2p_pd_config "${CMAKE_CURRENT_SOURCE_DIR}/puredata")
@@ -246,12 +260,15 @@ pd_add_datafile(p2p_pd_config "${P2P_PD_DATAFILES}")
 target_include_directories(p2p_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/pd")
 
 if(APPLE)
-    foreach(P2P_PD_TARGET p2p_pd_config p2p_pd_r_audio p2p_pd_s_audio p2p_pd_r_video)
+    foreach(
+        P2P_PD_TARGET
+        p2p_pd_config
+        p2p_pd_r_audio
+        p2p_pd_s_audio
+        p2p_pd_r_video)
         target_include_directories(
-            ${P2P_PD_TARGET}
-            PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p"
-                    "${opus_SOURCE_DIR}/include"
-                    "${libdatachannel_SOURCE_DIR}/include")
+            ${P2P_PD_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/p2p" "${opus_SOURCE_DIR}/include"
+                                     "${libdatachannel_SOURCE_DIR}/include")
         # These are header-only usage requirements exposed by P2PSession.hpp/P2PPeer.hpp. Do not link any of the
         # corresponding static implementation libraries into the thin externals.
         target_link_libraries(
@@ -263,9 +280,7 @@ if(APPLE)
                     ffmpeg.swscale.headers
                     ffmpeg.avutil.headers)
         target_compile_definitions(${P2P_PD_TARGET} PRIVATE P2P_VIDEO=1)
-        set_target_properties(
-            ${P2P_PD_TARGET}
-            PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
+        set_target_properties(${P2P_PD_TARGET} PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
 
         # pd.cmake currently adds -flat_namespace. Retain dynamic lookup only for Pd's host API; normal two-level
         # binding ensures the external's other symbols resolve to p2p.runtime instead of another loaded external.
@@ -297,7 +312,11 @@ target_sources(
 if(UNIX)
     target_compile_definitions(p2p_core PUBLIC HAVE_UNISTD_H=1 HAVE_SYS_TIME_H=1 HAVE_SYS_TYPES_H=1)
 endif()
-set(P2P_OPTIMIZED_TARGETS p2p_core p2p_pd_r_video p2p_pd_r_audio p2p_pd_s_audio)
+set(P2P_OPTIMIZED_TARGETS
+    p2p_core
+    p2p_pd_r_video
+    p2p_pd_r_audio
+    p2p_pd_s_audio)
 if(APPLE)
     list(APPEND P2P_OPTIMIZED_TARGETS p2p_pd_runtime)
 endif()
