@@ -189,7 +189,7 @@ static std::string P2PConfigAtomsToText(int argc, t_atom *argv) {
 // ─────────────────────────────────────
 static void P2PConfigMessage(P2PConfig *object, t_symbol *, int argc, t_atom *argv) {
     if (object->m_Session && *object->m_Session && object->m_ControlsSession) {
-        (*object->m_Session)->SendMessage(P2PConfigAtomsToText(argc, argv));
+        (*object->m_Session)->SendTextMessage(P2PConfigAtomsToText(argc, argv));
     }
 }
 

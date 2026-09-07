@@ -566,7 +566,7 @@ bool P2PSession::Streaming() const {
 }
 
 // ─────────────────────────────────────
-void P2PSession::SendMessage(const std::string &text) {
+void P2PSession::SendTextMessage(const std::string &text) {
     Json payload = {{"type", "message"}, {"text", text}};
     const std::string serialized = payload.dump(4);
     SendJson(serialized);

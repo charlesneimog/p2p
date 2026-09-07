@@ -65,7 +65,8 @@ public:
     void Disconnect();
     void SetStreaming(bool enabled);
     bool Streaming() const;
-    void SendMessage(const std::string &text);
+    // Avoid the Windows SDK's SendMessage macro, also included by the Max SDK.
+    void SendTextMessage(const std::string &text);
     void SendJson(const std::string &json_text);
     int ConnectionCount() const;
     void Report();
