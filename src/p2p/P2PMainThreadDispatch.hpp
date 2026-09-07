@@ -4,6 +4,10 @@
 
 class P2PMainThreadDispatch {
 public:
-    static void initialize();
-    static void enqueue(std::function<void()> function);
+    static void Initialize();
+    static void Enqueue(std::function<void()> function);
+
+private:
+    struct State;
+    static State &GetState();
 };

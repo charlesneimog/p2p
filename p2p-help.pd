@@ -1,4 +1,4 @@
-#N canvas 0 0 925 1130 10;
+#N canvas 0 0 925 1129 10;
 #X declare -lib build/p2p;
 #X declare -lib Gem;
 #X obj 3 3 declare -lib build/p2p;
@@ -70,7 +70,7 @@
 #X obj 74 466 *~ 0.01;
 #X obj 137 414 osc~ 451;
 #X obj 297 304 p2p.r.video LaFlauta user_1262;
-#X obj 3 238 p2p.r.audio~ LaFlauta send_9748;
+#X obj 3 238 p2p.r.audio~ LaFlauta send_1580;
 #X connect 1 0 10 0;
 #X connect 1 0 23 0;
 #X connect 3 0 2 0;

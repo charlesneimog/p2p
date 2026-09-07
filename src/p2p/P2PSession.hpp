@@ -32,16 +32,16 @@ enum class P2PLogLevel {
 };
 
 struct P2PEvent {
-    P2PEventType type;
-    std::string peer;
-    std::string text;
-    int count{0};
-    P2PLogLevel log_level{P2PLogLevel::Normal};
+    P2PEventType m_Type;
+    std::string m_Peer;
+    std::string m_Text;
+    int m_Count{0};
+    P2PLogLevel m_LogLevel{P2PLogLevel::Normal};
 };
 
 struct P2PPeerResolution {
-    std::shared_ptr<P2PPeer> peer;
-    bool ambiguous{false};
+    std::shared_ptr<P2PPeer> m_Peer;
+    bool m_Ambiguous{false};
 };
 
 class P2PSession : public std::enable_shared_from_this<P2PSession> {
@@ -49,113 +49,112 @@ public:
     using Listener = std::function<void(const P2PEvent &)>;
     using MainThreadDispatcher = std::function<void(std::function<void()>)>;
 
-    static std::shared_ptr<P2PSession> create(const std::string &id, int sample_rate,
+    static std::shared_ptr<P2PSession> Create(const std::string &id, int sample_rate,
                                               MainThreadDispatcher dispatcher);
     ~P2PSession();
 
-    const std::string &id() const;
-    bool available() const;
-    bool connected() const;
-    void deactivate();
+    const std::string &Id() const;
+    bool Available() const;
+    bool Connected() const;
+    void Deactivate();
 
-    uint64_t addListener(Listener listener);
-    void removeListener(uint64_t listener_id);
-    void connect(const std::string &websocket_url, const std::string &room,
+    uint64_t AddListener(Listener listener);
+    void RemoveListener(uint64_t listener_id);
+    void Connect(const std::string &websocket_url, const std::string &room,
                  const std::string &local_username);
-    void disconnect();
-    void setStreaming(bool enabled);
-    bool streaming() const;
-    void sendMessage(const std::string &text);
-    void sendJson(const std::string &json_text);
-    int connectionCount() const;
-    void report();
+    void Disconnect();
+    void SetStreaming(bool enabled);
+    bool Streaming() const;
+    void SendMessage(const std::string &text);
+    void SendJson(const std::string &json_text);
+    int ConnectionCount() const;
+    void Report();
 
-    bool claimController(const void *owner);
-    void releaseController(const void *owner);
-    bool claimAudioSender(const void *owner);
-    void releaseAudioSender(const void *owner);
-    bool claimAudioReceiver(const std::string &username, const void *owner);
-    void releaseAudioReceiver(const std::string &username, const void *owner);
-    void registerVideoReceiver();
-    void unregisterVideoReceiver();
-    bool videoNegotiated() const;
+    bool ClaimController(const void *owner);
+    void ReleaseController(const void *owner);
+    bool ClaimAudioSender(const void *owner);
+    void ReleaseAudioSender(const void *owner);
+    bool ClaimAudioReceiver(const std::string &username, const void *owner);
+    void ReleaseAudioReceiver(const std::string &username, const void *owner);
+    void RegisterVideoReceiver();
+    void UnregisterVideoReceiver();
+    bool VideoNegotiated() const;
 
-    std::vector<std::shared_ptr<P2PPeer>> peerSnapshot() const;
-    void pushOutgoingAudio(const float *samples, int count, int channels = 1);
-    P2PPeerResolution resolvePeer(const std::string &username) const;
-    int frameSize() const;
-    int sampleRate() const;
+    std::vector<std::shared_ptr<P2PPeer>> PeerSnapshot() const;
+    void PushOutgoingAudio(const float *samples, int count, int channels = 1);
+    P2PPeerResolution ResolvePeer(const std::string &username) const;
+    int FrameSize() const;
+    int SampleRate() const;
 
 private:
     P2PSession(std::string id, int sample_rate, MainThreadDispatcher dispatcher);
-    void initialize();
-    void emit(P2PEvent event);
-    void log(P2PLogLevel level, const char *format, ...);
-    void error(const char *format, ...);
+    void Initialize();
+    void Emit(P2PEvent event);
+    void Log(P2PLogLevel level, const char *format, ...);
+    void Error(const char *format, ...);
 
-    void installWebSocketCallbacks();
-    void onSignallingMessage(const std::string &payload);
-    void welcome(const nlohmann::json &data);
-    void peerJoined(const nlohmann::json &data);
-    void existingPeers(const nlohmann::json &data);
-    void offer(const nlohmann::json &data);
-    void answer(const nlohmann::json &data);
-    void iceCandidate(const nlohmann::json &data);
-    void peerLeft(const nlohmann::json &data);
+    void InstallWebSocketCallbacks();
+    void OnSignallingMessage(const std::string &payload);
+    void Welcome(const nlohmann::json &data);
+    void PeerJoined(const nlohmann::json &data);
+    void ExistingPeers(const nlohmann::json &data);
+    void Offer(const nlohmann::json &data);
+    void Answer(const nlohmann::json &data);
+    void IceCandidate(const nlohmann::json &data);
+    void PeerLeft(const nlohmann::json &data);
 
-    std::shared_ptr<P2PPeer> addPeer(const std::string &peer_id, const std::string &username);
-    std::shared_ptr<P2PPeer> findPeerById(const std::string &peer_id) const;
-    void removePeer(const std::string &peer_id, bool notify);
-    void removeAllPeers();
-    bool setupWebRtc(const std::shared_ptr<P2PPeer> &peer);
-    void resetPeerConnection(const std::shared_ptr<P2PPeer> &peer);
-    void flushPendingCandidates(const std::shared_ptr<P2PPeer> &peer);
-    void configureVideoMedia(rtc::Description &description);
-    void decodeAudio(const std::shared_ptr<P2PPeer> &peer, const rtc::binary &data);
-    void updateConnectionState(const std::shared_ptr<P2PPeer> &peer,
+    std::shared_ptr<P2PPeer> AddPeer(const std::string &peer_id, const std::string &username);
+    std::shared_ptr<P2PPeer> FindPeerById(const std::string &peer_id) const;
+    void RemovePeer(const std::string &peer_id, bool notify);
+    void RemoveAllPeers();
+    bool SetupWebRtc(const std::shared_ptr<P2PPeer> &peer);
+    void ResetPeerConnection(const std::shared_ptr<P2PPeer> &peer);
+    void FlushPendingCandidates(const std::shared_ptr<P2PPeer> &peer);
+    void ConfigureVideoMedia(rtc::Description &description);
+    void DecodeAudio(const std::shared_ptr<P2PPeer> &peer, const rtc::binary &data);
+    void UpdateConnectionState(const std::shared_ptr<P2PPeer> &peer,
                                rtc::PeerConnection::State state);
-    void emitConnectionCount();
-    void warnIfNotStunPair(const std::shared_ptr<P2PPeer> &peer);
-    bool createPeerDecoder(const std::shared_ptr<P2PPeer> &peer);
-    void rebuildRealtimePeersLocked();
+    void EmitConnectionCount();
+    void WarnIfNotStunPair(const std::shared_ptr<P2PPeer> &peer);
+    bool CreatePeerDecoder(const std::shared_ptr<P2PPeer> &peer);
+    void RebuildRealtimePeersLocked();
 
 #ifdef P2P_VIDEO
-    bool initializeVideoDecoder(const std::shared_ptr<P2PPeer> &peer);
-    void decodeVideoFrame(const std::shared_ptr<P2PPeer> &peer, const rtc::binary &data);
+    bool InitializeVideoDecoder(const std::shared_ptr<P2PPeer> &peer);
+    void DecodeVideoFrame(const std::shared_ptr<P2PPeer> &peer, const rtc::binary &data);
 #endif
 
-    const std::string id_;
-    const int sample_rate_;
-    const MainThreadDispatcher main_thread_dispatcher_;
-    const int frame_size_{120}; // Minimum Opus frame: 2.5 ms at 48 kHz.
-    std::atomic<bool> available_{true};
-    std::atomic<bool> websocket_connected_{false};
-    std::atomic<bool> wants_stream_{false};
-    std::atomic<int> video_receivers_{0};
-    std::atomic<bool> video_negotiated_{false};
+    const std::string m_Id;
+    const int m_SampleRate;
+    const MainThreadDispatcher m_MainThreadDispatcher;
+    const int m_FrameSize{120}; // Minimum Opus frame: 2.5 ms at 48 kHz.
+    std::atomic<bool> m_Available{true};
+    std::atomic<bool> m_WebsocketConnected{false};
+    std::atomic<bool> m_WantsStream{false};
+    std::atomic<int> m_VideoReceivers{0};
+    std::atomic<bool> m_VideoNegotiated{false};
 
-    mutable std::mutex websocket_mutex_;
-    std::shared_ptr<rtc::WebSocket> websocket_;
-    std::string websocket_ca_bundle_;
-    std::string local_peer_id_;
-    std::string room_;
-    std::string local_username_;
+    mutable std::mutex m_WebsocketMutex;
+    std::shared_ptr<rtc::WebSocket> m_Websocket;
+    std::string m_WebsocketCaBundle;
+    std::string m_LocalPeerId;
+    std::string m_Room;
+    std::string m_LocalUsername;
 
-    mutable std::mutex peers_mutex_;
-    std::unordered_map<std::string, std::shared_ptr<P2PPeer>> peers_by_id_;
-    std::unordered_map<std::string, std::vector<std::weak_ptr<P2PPeer>>> peers_by_name_;
-    std::atomic<const std::vector<std::shared_ptr<P2PPeer>> *> realtime_peers_{nullptr};
+    mutable std::mutex m_PeersMutex;
+    std::unordered_map<std::string, std::shared_ptr<P2PPeer>> m_PeersById;
+    std::unordered_map<std::string, std::vector<std::weak_ptr<P2PPeer>>> m_PeersByName;
+    std::atomic<const std::vector<std::shared_ptr<P2PPeer>> *> m_RealtimePeers{nullptr};
     std::vector<std::shared_ptr<const std::vector<std::shared_ptr<P2PPeer>>>>
-        retained_peer_snapshots_;
-    std::vector<std::shared_ptr<P2PPeer>> retired_peers_;
+        m_RetainedPeerSnapshots;
+    std::vector<std::shared_ptr<P2PPeer>> m_RetiredPeers;
 
-    mutable std::mutex listeners_mutex_;
-    std::unordered_map<uint64_t, Listener> listeners_;
-    std::atomic<uint64_t> next_listener_id_{1};
+    mutable std::mutex m_ListenersMutex;
+    std::unordered_map<uint64_t, Listener> m_Listeners;
+    std::atomic<uint64_t> m_NextListenerId{1};
 
-    mutable std::mutex claims_mutex_;
-    const void *controller_owner_{nullptr};
-    const void *audio_sender_owner_{nullptr};
-    std::unordered_map<std::string, const void *> audio_receiver_owners_;
-
+    mutable std::mutex m_ClaimsMutex;
+    const void *m_ControllerOwner{nullptr};
+    const void *m_AudioSenderOwner{nullptr};
+    std::unordered_map<std::string, const void *> m_AudioReceiverOwners;
 };

@@ -21,14 +21,14 @@ extern "C" {
 #endif
 
 struct QueuedCandidate {
-    std::string candidate;
-    std::string mid;
+    std::string m_Candidate;
+    std::string m_Mid;
 };
 
 struct QueuedAudioSample {
-    float left;
-    float right;
-    int channels;
+    float m_Left;
+    float m_Right;
+    int m_Channels;
 };
 
 class P2PPeer : public std::enable_shared_from_this<P2PPeer> {
@@ -36,63 +36,63 @@ public:
     P2PPeer(std::string peer_id, std::string username);
     ~P2PPeer();
 
-    bool initializeEncoder(int sample_rate);
-    void startTransmission(int frame_size, int sample_rate);
-    void shutdown();
-    bool popReceived(float &sample);
+    bool InitializeEncoder(int sample_rate);
+    void StartTransmission(int frame_size, int sample_rate);
+    void Shutdown();
+    bool PopReceived(float &sample);
 
-    const std::string peer_id;
-    const std::string username;
-    std::atomic<bool> active{true};
-    std::atomic<bool> connected{false};
-    std::atomic<bool> is_streaming{false};
+    const std::string m_PeerId;
+    const std::string m_Username;
+    std::atomic<bool> m_Active{true};
+    std::atomic<bool> m_Connected{false};
+    std::atomic<bool> m_IsStreaming{false};
 
-    // The perfect-negotiation state is intentionally kept verbatim.
-    std::vector<QueuedCandidate> pending_remote_candidates;
-    bool remote_description_set{false};
-    bool is_polite{false};
-    bool making_offer{false};
-    bool ignore_offer{false};
-    bool answering_offer{false};
-    bool local_offer_sent{false};
-    bool polite_media_offer_sent{false};
-    bool stun_warning_reported{false};
+    // Perfect-negotiation state belongs to this peer connection.
+    std::vector<QueuedCandidate> m_PendingRemoteCandidates;
+    bool m_RemoteDescriptionSet{false};
+    bool m_IsPolite{false};
+    bool m_MakingOffer{false};
+    bool m_IgnoreOffer{false};
+    bool m_AnsweringOffer{false};
+    bool m_LocalOfferSent{false};
+    bool m_PoliteMediaOfferSent{false};
+    bool m_StunWarningReported{false};
 
-    std::shared_ptr<rtc::WebSocket> ws;
-    std::shared_ptr<rtc::PeerConnection> pc;
-    std::shared_ptr<rtc::DataChannel> dc;
-    std::shared_ptr<rtc::Track> audio_track;
-    boost::lockfree::spsc_queue<QueuedAudioSample, boost::lockfree::capacity<16384>> send_buffer;
-    boost::lockfree::spsc_queue<float, boost::lockfree::capacity<16384>> receive_buffer;
-    uint32_t audio_ssrc{0};
-    std::shared_ptr<rtc::RtpPacketizationConfig> rtp_config;
-    OpusDecoder *opus_dec_mono{nullptr};
-    std::mutex opus_dec_mono_mutex;
-    std::vector<std::function<void()>> pending_negotiations;
+    std::shared_ptr<rtc::WebSocket> m_Websocket;
+    std::shared_ptr<rtc::PeerConnection> m_PeerConnection;
+    std::shared_ptr<rtc::DataChannel> m_DataChannel;
+    std::shared_ptr<rtc::Track> m_AudioTrack;
+    boost::lockfree::spsc_queue<QueuedAudioSample, boost::lockfree::capacity<16384>> m_SendBuffer;
+    boost::lockfree::spsc_queue<float, boost::lockfree::capacity<16384>> m_ReceiveBuffer;
+    uint32_t m_AudioSsrc{0};
+    std::shared_ptr<rtc::RtpPacketizationConfig> m_RtpConfig;
+    OpusDecoder *m_OpusDecMono{nullptr};
+    std::mutex m_OpusDecMonoMutex;
+    std::vector<std::function<void()>> m_PendingNegotiations;
 
 #ifdef P2P_VIDEO
-    std::shared_ptr<rtc::Track> video_track;
-    const AVCodec *video_codec{nullptr};
-    AVCodecContext *video_decoder{nullptr};
-    AVFrame *video_frame{nullptr};
-    AVFrame *rgba_frame{nullptr};
-    SwsContext *video_scaler{nullptr};
-    std::vector<unsigned char> rgba_pixels;
-    std::mutex video_mutex;
-    uint64_t video_serial{0};
-    bool video_encoded_logged{false};
-    bool video_decoded_logged{false};
-    int video_decode_errors{0};
+    std::shared_ptr<rtc::Track> m_VideoTrack;
+    const AVCodec *m_VideoCodec{nullptr};
+    AVCodecContext *m_VideoDecoder{nullptr};
+    AVFrame *m_VideoFrame{nullptr};
+    AVFrame *m_RgbaFrame{nullptr};
+    SwsContext *m_VideoScaler{nullptr};
+    std::vector<unsigned char> m_RgbaPixels;
+    std::mutex m_VideoMutex;
+    uint64_t m_VideoSerial{0};
+    bool m_VideoEncodedLogged{false};
+    bool m_VideoDecodedLogged{false};
+    int m_VideoDecodeErrors{0};
 #endif
 
 private:
-    int encodeMono(const float *pcm, int samples, unsigned char *output, int capacity);
-    int encodeStereo(const float *pcm, int samples, unsigned char *output, int capacity);
+    int EncodeMono(const float *pcm, int samples, unsigned char *output, int capacity);
+    int EncodeStereo(const float *pcm, int samples, unsigned char *output, int capacity);
 
-    OpusEncoder *opus_enc_mono_{nullptr};
-    OpusEncoder *opus_enc_stereo_{nullptr};
-    std::thread tx_thread_;
-    std::atomic<bool> thread_running_{false};
-    std::mutex shutdown_mutex_;
-    bool shut_down_{false};
+    OpusEncoder *m_OpusEncMono{nullptr};
+    OpusEncoder *m_OpusEncStereo{nullptr};
+    std::thread m_TxThread;
+    std::atomic<bool> m_ThreadRunning{false};
+    std::mutex m_ShutdownMutex;
+    bool m_ShutDown{false};
 };

@@ -6,48 +6,59 @@
 #include <mutex>
 #include <unordered_map>
 
-// GLOBAL
-std::mutex registry_mutex;
-std::unordered_map<std::string, std::weak_ptr<P2PSession>> sessions;
+struct P2PSessionRegistry::State {
+    std::mutex m_Mutex;
+    std::unordered_map<std::string, std::weak_ptr<P2PSession>> m_Sessions;
+};
 
 // ─────────────────────────────────────
-std::shared_ptr<P2PSession> P2PSessionRegistry::acquire(const std::string &id, int sample_rate) {
-    std::lock_guard<std::mutex> lock(registry_mutex);
-    auto &entry = sessions[id];
-    auto session = entry.lock();
+P2PSessionRegistry::State &P2PSessionRegistry::GetState() {
+    static State state;
+    return state;
+}
+
+// ─────────────────────────────────────
+std::shared_ptr<P2PSession> P2PSessionRegistry::Acquire(const std::string &id, int sample_rate) {
+    State &state = GetState();
+    std::lock_guard<std::mutex> lock(state.m_Mutex);
+    std::weak_ptr<P2PSession> &entry = state.m_Sessions[id];
+    std::shared_ptr<P2PSession> session = entry.lock();
     if (!session) {
-        session = P2PSession::create(id, sample_rate, P2PMainThreadDispatch::enqueue);
+        session = P2PSession::Create(id, sample_rate, P2PMainThreadDispatch::Enqueue);
         entry = session;
     }
     return session;
 }
 
 // ─────────────────────────────────────
-std::shared_ptr<P2PSession> P2PSessionRegistry::find(const std::string &id) {
-    std::lock_guard<std::mutex> lock(registry_mutex);
-    auto iterator = sessions.find(id);
-    if (iterator == sessions.end()) {
+std::shared_ptr<P2PSession> P2PSessionRegistry::Find(const std::string &id) {
+    State &state = GetState();
+    std::lock_guard<std::mutex> lock(state.m_Mutex);
+    auto iterator = state.m_Sessions.find(id);
+    if (iterator == state.m_Sessions.end()) {
         return {};
     }
-    auto session = iterator->second.lock();
-    if (!session || !session->available()) {
+    std::shared_ptr<P2PSession> session = iterator->second.lock();
+    if (!session || !session->Available()) {
         return {};
     }
     return session;
 }
 
 // ─────────────────────────────────────
-void P2PSessionRegistry::release(const std::string &id) {
-    std::lock_guard<std::mutex> lock(registry_mutex);
-    sessions.erase(id);
+void P2PSessionRegistry::Release(const std::string &id) {
+    State &state = GetState();
+    std::lock_guard<std::mutex> lock(state.m_Mutex);
+    state.m_Sessions.erase(id);
 }
 
 // ─────────────────────────────────────
-void P2PSessionRegistry::release(const std::string &id,
+void P2PSessionRegistry::Release(const std::string &id,
                                  const std::shared_ptr<P2PSession> &session) {
-    std::lock_guard<std::mutex> lock(registry_mutex);
-    auto iterator = sessions.find(id);
-    if (iterator != sessions.end() && iterator->second.lock() == session) {
-        sessions.erase(iterator);
+    State &state = GetState();
+    std::lock_guard<std::mutex> lock(state.m_Mutex);
+    auto iterator = state.m_Sessions.find(id);
+    if (iterator != state.m_Sessions.end() && iterator->second.lock() == session) {
+        state.m_Sessions.erase(iterator);
     }
 }

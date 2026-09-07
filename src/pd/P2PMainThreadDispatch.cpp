@@ -5,45 +5,49 @@
 #include <memory>
 #include <mutex>
 
-// ─────────────────────────────────────
 struct DispatchMessage {
-    std::function<void()> function;
+    std::function<void()> m_Function;
 };
 
-// ─────────────────────────────────────
 struct DispatchReceiver {
-    t_object object;
+    t_object m_Object;
+};
+
+struct P2PMainThreadDispatch::State {
+    std::mutex m_Mutex;
+    t_pd *m_Receiver{nullptr};
 };
 
 // ─────────────────────────────────────
-t_class *dispatch_class = nullptr;
-t_pd *dispatch_receiver = nullptr;
-
-// TODO: Try to avoid global
-std::mutex dispatch_mutex;
+P2PMainThreadDispatch::State &P2PMainThreadDispatch::GetState() {
+    static State state;
+    return state;
+}
 
 // ─────────────────────────────────────
-void dispatch_message(t_pd *, void *data) {
+static void DispatchMessageCallback(t_pd *, void *data) {
     std::unique_ptr<DispatchMessage> message(static_cast<DispatchMessage *>(data));
-    if (message->function) {
-        message->function();
+    if (message->m_Function) {
+        message->m_Function();
     }
 }
 
 // ─────────────────────────────────────
-void P2PMainThreadDispatch::initialize() {
-    std::lock_guard<std::mutex> lock(dispatch_mutex);
-    if (dispatch_receiver) {
+void P2PMainThreadDispatch::Initialize() {
+    State &state = GetState();
+    std::lock_guard<std::mutex> lock(state.m_Mutex);
+    if (state.m_Receiver) {
         return;
     }
-    dispatch_class = class_new(gensym("_p2p.mainthread.dispatch"), nullptr, nullptr,
-                               sizeof(DispatchReceiver), CLASS_PD, A_NULL, 0);
-    dispatch_receiver = pd_new(dispatch_class);
+    t_class *dispatch_class = class_new(gensym("_p2p.mainthread.dispatch"), nullptr, nullptr,
+                                        sizeof(DispatchReceiver), CLASS_PD, A_NULL, 0);
+    state.m_Receiver = pd_new(dispatch_class);
 }
 
 // ─────────────────────────────────────
-void P2PMainThreadDispatch::enqueue(std::function<void()> function) {
-    initialize();
-    auto *message = new DispatchMessage{std::move(function)};
-    pd_queue_mess(&pd_maininstance, dispatch_receiver, message, dispatch_message);
+void P2PMainThreadDispatch::Enqueue(std::function<void()> function) {
+    Initialize();
+    State &state = GetState();
+    DispatchMessage *message = new DispatchMessage{std::move(function)};
+    pd_queue_mess(&pd_maininstance, state.m_Receiver, message, DispatchMessageCallback);
 }

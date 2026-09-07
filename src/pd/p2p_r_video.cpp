@@ -16,87 +16,91 @@ extern "C" {
 }
 #endif
 
-static t_class *p2p_r_video_class = nullptr;
-
 struct P2PRVideo {
-    t_object object;
-    std::string *session_id;
-    std::string *username;
-    std::shared_ptr<P2PSession> *session;
-    t_clock *attach_clock;
-    t_outlet *gem_outlet;
-    t_outlet *info_outlet;
-    bool registered;
-    bool missing_reported;
-    bool ambiguity_reported;
+    t_object m_Object;
+    std::string *m_SessionId;
+    std::string *m_Username;
+    std::shared_ptr<P2PSession> *m_Session;
+    t_clock *m_AttachClock;
+    t_outlet *m_GemOutlet;
+    t_outlet *m_InfoOutlet;
+    bool m_Registered;
+    bool m_MissingReported;
+    bool m_AmbiguityReported;
 #ifdef P2P_VIDEO
-    pixBlock *pixels;
-    uint64_t serial;
+    pixBlock *m_Pixels;
+    uint64_t m_Serial;
 #endif
+
+    static t_class *&GetClass() {
+        // The host retains this registration for the lifetime of the external.
+        static t_class *host_class = nullptr;
+        return host_class;
+    }
 };
 
 #ifdef P2P_VIDEO
-static void p2p_r_video_output_info(P2PRVideo *object, int width, int height, const char *codec,
-                                    const char *pixel_format) {
+static void P2PRVideoOutputInfo(P2PRVideo *object, int width, int height, const char *codec,
+                                const char *pixel_format) {
     t_atom resolution[2];
     SETFLOAT(resolution, width);
     SETFLOAT(resolution + 1, height);
-    outlet_anything(object->info_outlet, gensym("resolution"), 2, resolution);
+    outlet_anything(object->m_InfoOutlet, gensym("resolution"), 2, resolution);
 
     t_atom value;
     SETSYMBOL(&value, gensym(codec ? codec : "unknown"));
-    outlet_anything(object->info_outlet, gensym("codec"), 1, &value);
+    outlet_anything(object->m_InfoOutlet, gensym("codec"), 1, &value);
     SETSYMBOL(&value, gensym(pixel_format ? pixel_format : "unknown"));
-    outlet_anything(object->info_outlet, gensym("pixel_format"), 1, &value);
+    outlet_anything(object->m_InfoOutlet, gensym("pixel_format"), 1, &value);
 }
 #endif
 
 // ─────────────────────────────────────
-static void p2p_r_video_detach(P2PRVideo *object) {
-    auto session = std::atomic_load(object->session);
-    if (session && object->registered) {
-        session->unregisterVideoReceiver();
+static void P2PRVideoDetach(P2PRVideo *object) {
+    std::shared_ptr<P2PSession> session = std::atomic_load(object->m_Session);
+    if (session && object->m_Registered) {
+        session->UnregisterVideoReceiver();
     }
-    object->registered = false;
-    std::atomic_store(object->session, std::shared_ptr<P2PSession>());
+    object->m_Registered = false;
+    std::atomic_store(object->m_Session, std::shared_ptr<P2PSession>());
 }
 
 // ─────────────────────────────────────
-static void p2p_r_video_poll(P2PRVideo *object) {
-    if (!object->session_id->empty() && !object->username->empty()) {
-        auto current = std::atomic_load(object->session);
-        auto found = P2PSessionRegistry::find(*object->session_id);
+static void P2PRVideoPoll(P2PRVideo *object) {
+    if (!object->m_SessionId->empty() && !object->m_Username->empty()) {
+        std::shared_ptr<P2PSession> current = std::atomic_load(object->m_Session);
+        std::shared_ptr<P2PSession> found = P2PSessionRegistry::Find(*object->m_SessionId);
         if (found != current) {
-            p2p_r_video_detach(object);
+            P2PRVideoDetach(object);
             if (found) {
-                found->registerVideoReceiver();
-                object->registered = true;
-                std::atomic_store(object->session, found);
+                found->RegisterVideoReceiver();
+                object->m_Registered = true;
+                std::atomic_store(object->m_Session, found);
             }
         }
         if (found) {
-            object->missing_reported = false;
-            const auto resolution = found->resolvePeer(*object->username);
-            if (resolution.ambiguous && !object->ambiguity_reported) {
-                object->ambiguity_reported = true;
+            object->m_MissingReported = false;
+            const P2PPeerResolution resolution = found->ResolvePeer(*object->m_Username);
+            if (resolution.m_Ambiguous && !object->m_AmbiguityReported) {
+                object->m_AmbiguityReported = true;
                 pd_error(object, "[p2p.r.video] duplicate username is ambiguous: '%s'",
-                         object->username->c_str());
-            } else if (!resolution.ambiguous) {
-                object->ambiguity_reported = false;
+                         object->m_Username->c_str());
+            } else if (!resolution.m_Ambiguous) {
+                object->m_AmbiguityReported = false;
             }
-        } else if (!object->missing_reported) {
-            object->missing_reported = true;
+        } else if (!object->m_MissingReported) {
+            object->m_MissingReported = true;
             pd_error(object, "[p2p.r.video] no active [p2p.config] for session '%s'; waiting",
-                     object->session_id->c_str());
+                     object->m_SessionId->c_str());
         }
     }
-    clock_delay(object->attach_clock, 100);
+    clock_delay(object->m_AttachClock, 100);
 }
 
 // ─────────────────────────────────────
-static void p2p_r_video_gem_state(P2PRVideo *object, t_symbol *, int argc, t_atom *argv) {
+static void P2PRVideoGemState(P2PRVideo *object, t_symbol *, int argc, t_atom *argv) {
 #ifndef P2P_VIDEO
-    outlet_anything(object->gem_outlet, gensym("gem_state"), argc, argv);
+    outlet_anything(object->m_GemOutlet, gensym("gem_state"), argc, argv);
 #else
     if (argc != 2 || argv[0].a_type != A_POINTER || argv[1].a_type != A_POINTER) {
         pd_error(object, "[p2p.r.video] expected 2 GEM state pointers");
@@ -104,49 +108,51 @@ static void p2p_r_video_gem_state(P2PRVideo *object, t_symbol *, int argc, t_ato
     }
     auto *state = reinterpret_cast<GemState *>(argv[1].a_w.w_gpointer);
     if (!state) {
-        outlet_anything(object->gem_outlet, gensym("gem_state"), argc, argv);
+        outlet_anything(object->m_GemOutlet, gensym("gem_state"), argc, argv);
         return;
     }
-    auto session = std::atomic_load(object->session);
-    auto resolution = session ? session->resolvePeer(*object->username) : P2PPeerResolution{};
-    auto peer = resolution.ambiguous ? std::shared_ptr<P2PPeer>() : resolution.peer;
+    std::shared_ptr<P2PSession> session = std::atomic_load(object->m_Session);
+    P2PPeerResolution resolution =
+        session ? session->ResolvePeer(*object->m_Username) : P2PPeerResolution{};
+    std::shared_ptr<P2PPeer> peer =
+        resolution.m_Ambiguous ? std::shared_ptr<P2PPeer>() : resolution.m_Peer;
     pixBlock *previous = nullptr;
     bool replaced = false;
     int width = 0;
     int height = 0;
     std::string codec;
     std::string pixel_format;
-    if (peer && peer->active) {
-        std::lock_guard<std::mutex> lock(peer->video_mutex);
-        if (peer->video_serial && peer->rgba_frame && peer->rgba_frame->width > 0) {
-            width = peer->rgba_frame->width;
-            height = peer->rgba_frame->height;
-            codec =
-                peer->video_codec && peer->video_codec->name ? peer->video_codec->name : "unknown";
+    if (peer && peer->m_Active) {
+        std::lock_guard<std::mutex> lock(peer->m_VideoMutex);
+        if (peer->m_VideoSerial && peer->m_RgbaFrame && peer->m_RgbaFrame->width > 0) {
+            width = peer->m_RgbaFrame->width;
+            height = peer->m_RgbaFrame->height;
+            codec = peer->m_VideoCodec && peer->m_VideoCodec->name ? peer->m_VideoCodec->name
+                                                                   : "unknown";
             const char *format_name =
-                peer->video_frame
-                    ? av_get_pix_fmt_name(static_cast<AVPixelFormat>(peer->video_frame->format))
+                peer->m_VideoFrame
+                    ? av_get_pix_fmt_name(static_cast<AVPixelFormat>(peer->m_VideoFrame->format))
                     : nullptr;
             pixel_format = format_name ? format_name : "unknown";
-            object->pixels->image.xsize = width;
-            object->pixels->image.ysize = height;
-            object->pixels->image.setFormat(GEM_RGBA);
-            unsigned char *destination = object->pixels->image.reallocate();
-            if (destination && !peer->rgba_pixels.empty()) {
-                memcpy(destination, peer->rgba_pixels.data(), peer->rgba_pixels.size());
-                object->pixels->image.upsidedown = true;
-                object->pixels->newimage = object->serial != peer->video_serial;
-                object->serial = peer->video_serial;
+            object->m_Pixels->image.xsize = width;
+            object->m_Pixels->image.ysize = height;
+            object->m_Pixels->image.setFormat(GEM_RGBA);
+            unsigned char *destination = object->m_Pixels->image.reallocate();
+            if (destination && !peer->m_RgbaPixels.empty()) {
+                memcpy(destination, peer->m_RgbaPixels.data(), peer->m_RgbaPixels.size());
+                object->m_Pixels->image.upsidedown = true;
+                object->m_Pixels->newimage = object->m_Serial != peer->m_VideoSerial;
+                object->m_Serial = peer->m_VideoSerial;
                 state->get(GemState::_PIX, previous);
-                state->set(GemState::_PIX, object->pixels);
+                state->set(GemState::_PIX, object->m_Pixels);
                 replaced = true;
             }
         }
     }
     if (replaced) {
-        p2p_r_video_output_info(object, width, height, codec.c_str(), pixel_format.c_str());
+        P2PRVideoOutputInfo(object, width, height, codec.c_str(), pixel_format.c_str());
     }
-    outlet_anything(object->gem_outlet, gensym("gem_state"), argc, argv);
+    outlet_anything(object->m_GemOutlet, gensym("gem_state"), argc, argv);
     if (replaced) {
         state->set(GemState::_PIX, previous);
     }
@@ -154,20 +160,20 @@ static void p2p_r_video_gem_state(P2PRVideo *object, t_symbol *, int argc, t_ato
 }
 
 // ─────────────────────────────────────
-static void *p2p_r_video_new(t_symbol *, int argc, t_atom *argv) {
-    auto *object = reinterpret_cast<P2PRVideo *>(pd_new(p2p_r_video_class));
-    object->session_id = new std::string();
-    object->username = new std::string();
-    object->session = new std::shared_ptr<P2PSession>();
-    object->registered = false;
-    object->missing_reported = false;
-    object->ambiguity_reported = false;
-    object->gem_outlet = outlet_new(&object->object, gensym("gem_state"));
-    object->info_outlet = outlet_new(&object->object, &s_anything);
-    object->attach_clock = clock_new(object, reinterpret_cast<t_method>(p2p_r_video_poll));
+static void *P2PRVideoNew(t_symbol *, int argc, t_atom *argv) {
+    auto *object = reinterpret_cast<P2PRVideo *>(pd_new(P2PRVideo::GetClass()));
+    object->m_SessionId = new std::string();
+    object->m_Username = new std::string();
+    object->m_Session = new std::shared_ptr<P2PSession>();
+    object->m_Registered = false;
+    object->m_MissingReported = false;
+    object->m_AmbiguityReported = false;
+    object->m_GemOutlet = outlet_new(&object->m_Object, gensym("gem_state"));
+    object->m_InfoOutlet = outlet_new(&object->m_Object, &s_anything);
+    object->m_AttachClock = clock_new(object, reinterpret_cast<t_method>(P2PRVideoPoll));
 #ifdef P2P_VIDEO
-    object->pixels = new pixBlock();
-    object->serial = 0;
+    object->m_Pixels = new pixBlock();
+    object->m_Serial = 0;
 #else
     pd_error(object, "[p2p.r.video] video support was not compiled");
 #endif
@@ -175,31 +181,32 @@ static void *p2p_r_video_new(t_symbol *, int argc, t_atom *argv) {
         !atom_getsymbol(argv)->s_name[0] || !atom_getsymbol(argv + 1)->s_name[0]) {
         pd_error(object, "[p2p.r.video] expected session ID and username");
     } else {
-        *object->session_id = atom_getsymbol(argv)->s_name;
-        *object->username = atom_getsymbol(argv + 1)->s_name;
+        *object->m_SessionId = atom_getsymbol(argv)->s_name;
+        *object->m_Username = atom_getsymbol(argv + 1)->s_name;
     }
-    clock_delay(object->attach_clock, 0);
+    clock_delay(object->m_AttachClock, 0);
     return object;
 }
 
 // ─────────────────────────────────────
-static void p2p_r_video_free(P2PRVideo *object) {
-    clock_unset(object->attach_clock);
-    clock_free(object->attach_clock);
-    p2p_r_video_detach(object);
+static void P2PRVideoFree(P2PRVideo *object) {
+    clock_unset(object->m_AttachClock);
+    clock_free(object->m_AttachClock);
+    P2PRVideoDetach(object);
 #ifdef P2P_VIDEO
-    delete object->pixels;
+    delete object->m_Pixels;
 #endif
-    delete object->session;
-    delete object->username;
-    delete object->session_id;
+    delete object->m_Session;
+    delete object->m_Username;
+    delete object->m_SessionId;
 }
 
 // ─────────────────────────────────────
 extern "C" void setup_p2p0x2er0x2evideo() {
-    p2p_r_video_class = class_new(
-        gensym("p2p.r.video"), reinterpret_cast<t_newmethod>(p2p_r_video_new),
-        reinterpret_cast<t_method>(p2p_r_video_free), sizeof(P2PRVideo), CLASS_DEFAULT, A_GIMME, 0);
-    class_addmethod(p2p_r_video_class, reinterpret_cast<t_method>(p2p_r_video_gem_state),
-                    gensym("gem_state"), A_GIMME, 0);
+    t_class *host_class = class_new(
+        gensym("p2p.r.video"), reinterpret_cast<t_newmethod>(P2PRVideoNew),
+        reinterpret_cast<t_method>(P2PRVideoFree), sizeof(P2PRVideo), CLASS_DEFAULT, A_GIMME, 0);
+    class_addmethod(host_class, reinterpret_cast<t_method>(P2PRVideoGemState), gensym("gem_state"),
+                    A_GIMME, 0);
+    P2PRVideo::GetClass() = host_class;
 }

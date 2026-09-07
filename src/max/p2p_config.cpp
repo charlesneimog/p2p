@@ -12,153 +12,159 @@
 #include <memory>
 #include <string>
 
-static t_class *p2p_config_class = nullptr;
-
 struct ConfigLifetime {
-    std::atomic<bool> active{true};
-    t_object *object{nullptr};
-    void *outlet{nullptr};
+    std::atomic<bool> m_Active{true};
+    t_object *m_Object{nullptr};
+    void *m_Outlet{nullptr};
 };
 
 struct P2PConfig {
-    t_object object;
-    std::string *session_id;
-    std::shared_ptr<P2PSession> *session;
-    std::shared_ptr<ConfigLifetime> *lifetime;
-    uint64_t listener_id;
-    bool controls_session;
-    void *outlet;
+    t_object m_Object;
+    std::string *m_SessionId;
+    std::shared_ptr<P2PSession> *m_Session;
+    std::shared_ptr<ConfigLifetime> *m_Lifetime;
+    uint64_t m_ListenerId;
+    bool m_ControlsSession;
+    void *m_Outlet;
+
+    static t_class *&GetClass() {
+        // The host retains this registration for the lifetime of the external.
+        static t_class *host_class = nullptr;
+        return host_class;
+    }
 };
 
-static void p2p_config_output_event(const std::shared_ptr<ConfigLifetime> &lifetime,
-                                    const P2PEvent &event) {
-    if (!lifetime || !lifetime->active || !lifetime->object || !lifetime->outlet) {
+static void P2PConfigOutputEvent(const std::shared_ptr<ConfigLifetime> &lifetime,
+                                 const P2PEvent &event) {
+    if (!lifetime || !lifetime->m_Active || !lifetime->m_Object || !lifetime->m_Outlet) {
         return;
     }
-    switch (event.type) {
+    switch (event.m_Type) {
     case P2PEventType::Log:
-        object_post(lifetime->object,
-                "[p2p.config] %s", event.text.c_str());
+        object_post(lifetime->m_Object, "[p2p.config] %s", event.m_Text.c_str());
         break;
     case P2PEventType::Error: {
-        object_error((t_object *)lifetime->object, "[p2p.config] %s", event.text.c_str());
+        object_error((t_object *)lifetime->m_Object, "[p2p.config] %s", event.m_Text.c_str());
         t_atom atom;
-        atom_setsym(&atom, gensym(event.text.c_str()));
-        outlet_anything(lifetime->outlet, gensym("error"), 1, &atom);
+        atom_setsym(&atom, gensym(event.m_Text.c_str()));
+        outlet_anything(lifetime->m_Outlet, gensym("error"), 1, &atom);
         break;
     }
     case P2PEventType::Connected:
-        outlet_anything(lifetime->outlet, gensym("connected"), 0, nullptr);
+        outlet_anything(lifetime->m_Outlet, gensym("connected"), 0, nullptr);
         break;
     case P2PEventType::Disconnected:
-        outlet_anything(lifetime->outlet, gensym("disconnected"), 0, nullptr);
+        outlet_anything(lifetime->m_Outlet, gensym("disconnected"), 0, nullptr);
         break;
     case P2PEventType::Connections: {
         t_atom atom;
-        atom_setfloat(&atom, event.count);
-        outlet_anything(lifetime->outlet, gensym("connections"), 1, &atom);
+        atom_setfloat(&atom, event.m_Count);
+        outlet_anything(lifetime->m_Outlet, gensym("connections"), 1, &atom);
         break;
     }
     case P2PEventType::PeerJoined:
     case P2PEventType::PeerLeft: {
         t_atom atoms[2];
         atom_setsym(&atoms[0],
-                    gensym(event.type == P2PEventType::PeerJoined ? "joined" : "left"));
-        atom_setsym(&atoms[1], gensym(event.peer.c_str()));
-        outlet_anything(lifetime->outlet, gensym("peer"), 2, atoms);
+                    gensym(event.m_Type == P2PEventType::PeerJoined ? "joined" : "left"));
+        atom_setsym(&atoms[1], gensym(event.m_Peer.c_str()));
+        outlet_anything(lifetime->m_Outlet, gensym("peer"), 2, atoms);
         break;
     }
     case P2PEventType::Message: {
         t_atom atoms[2];
-        atom_setsym(&atoms[0], gensym(event.peer.c_str()));
-        atom_setsym(&atoms[1], gensym(event.text.c_str()));
-        outlet_anything(lifetime->outlet, gensym("json"), 2, atoms);
+        atom_setsym(&atoms[0], gensym(event.m_Peer.c_str()));
+        atom_setsym(&atoms[1], gensym(event.m_Text.c_str()));
+        outlet_anything(lifetime->m_Outlet, gensym("json"), 2, atoms);
         break;
     }
     }
 }
 
-static void *p2p_config_new(t_symbol *, long argc, t_atom *argv) {
-    auto *object = reinterpret_cast<P2PConfig *>(object_alloc(p2p_config_class));
-    object->session_id = new std::string();
-    object->session = new std::shared_ptr<P2PSession>();
-    object->lifetime = new std::shared_ptr<ConfigLifetime>(std::make_shared<ConfigLifetime>());
-    object->listener_id = 0;
-    object->controls_session = false;
-    object->outlet = outlet_new((t_object *)object, nullptr);
-    (*object->lifetime)->object = &object->object;
-    (*object->lifetime)->outlet = object->outlet;
+// ─────────────────────────────────────
+static void *P2PConfigNew(t_symbol *, long argc, t_atom *argv) {
+    auto *object = reinterpret_cast<P2PConfig *>(object_alloc(P2PConfig::GetClass()));
+    object->m_SessionId = new std::string();
+    object->m_Session = new std::shared_ptr<P2PSession>();
+    object->m_Lifetime = new std::shared_ptr<ConfigLifetime>(std::make_shared<ConfigLifetime>());
+    object->m_ListenerId = 0;
+    object->m_ControlsSession = false;
+    object->m_Outlet = outlet_new((t_object *)object, nullptr);
+    (*object->m_Lifetime)->m_Object = &object->m_Object;
+    (*object->m_Lifetime)->m_Outlet = object->m_Outlet;
 
-    if (argc < 1 || atom_gettype(argv + 0) != A_SYM ||
-        !atom_getsym(argv)->s_name[0]) {
+    if (argc < 1 || atom_gettype(argv + 0) != A_SYM || !atom_getsym(argv)->s_name[0]) {
         object_error((t_object *)object, "[p2p.config] missing session ID");
         return object;
     }
-    *object->session_id = atom_getsym(argv)->s_name;
-    *object->session = P2PSessionRegistry::acquire(
-        *object->session_id, static_cast<int>(sys_getsr()));
-    if ((*object->session)->sampleRate() != 48000) {
+    *object->m_SessionId = atom_getsym(argv)->s_name;
+    *object->m_Session =
+        P2PSessionRegistry::Acquire(*object->m_SessionId, static_cast<int>(sys_getsr()));
+    if ((*object->m_Session)->SampleRate() != 48000) {
+        object_error((t_object *)object, "[p2p.config] requires a sample rate of exactly 48000 Hz");
+        P2PSessionRegistry::Release(*object->m_SessionId, *object->m_Session);
+        object->m_Session->reset();
+        return object;
+    }
+    object->m_ControlsSession = (*object->m_Session)->ClaimController(object);
+    if (!object->m_ControlsSession) {
         object_error((t_object *)object,
-                     "[p2p.config] requires a sample rate of exactly 48000 Hz");
-        P2PSessionRegistry::release(*object->session_id, *object->session);
-        object->session->reset();
+                     "[p2p.config] another config already controls session '%s'",
+                     object->m_SessionId->c_str());
+        object->m_Session->reset();
         return object;
     }
-    object->controls_session = (*object->session)->claimController(object);
-    if (!object->controls_session) {
-        object_error((t_object *)object, "[p2p.config] another config already controls session '%s'",
-                 object->session_id->c_str());
-        object->session->reset();
-        return object;
-    }
-    std::weak_ptr<ConfigLifetime> weak_lifetime = *object->lifetime;
-    object->listener_id =
-        (*object->session)
-            ->addListener([weak_lifetime](const P2PEvent &event) {
-                if (auto lifetime = weak_lifetime.lock()) {
-                    p2p_config_output_event(lifetime, event);
-                }
-            });
+    std::weak_ptr<ConfigLifetime> weak_lifetime = *object->m_Lifetime;
+    object->m_ListenerId =
+        (*object->m_Session)->AddListener([weak_lifetime](const P2PEvent &event) {
+            if (auto lifetime = weak_lifetime.lock()) {
+                P2PConfigOutputEvent(lifetime, event);
+            }
+        });
     return object;
 }
 
-static void p2p_config_free(P2PConfig *object) {
-    if (object->lifetime && *object->lifetime) {
-        (*object->lifetime)->active = false;
-        (*object->lifetime)->object = nullptr;
-        (*object->lifetime)->outlet = nullptr;
+// ─────────────────────────────────────
+static void P2PConfigFree(P2PConfig *object) {
+    if (object->m_Lifetime && *object->m_Lifetime) {
+        (*object->m_Lifetime)->m_Active = false;
+        (*object->m_Lifetime)->m_Object = nullptr;
+        (*object->m_Lifetime)->m_Outlet = nullptr;
     }
-    if (object->session && *object->session && object->controls_session) {
-        (*object->session)->removeListener(object->listener_id);
-        (*object->session)->releaseController(object);
-        (*object->session)->deactivate();
-        P2PSessionRegistry::release(*object->session_id, *object->session);
+    if (object->m_Session && *object->m_Session && object->m_ControlsSession) {
+        (*object->m_Session)->RemoveListener(object->m_ListenerId);
+        (*object->m_Session)->ReleaseController(object);
+        (*object->m_Session)->Deactivate();
+        P2PSessionRegistry::Release(*object->m_SessionId, *object->m_Session);
     }
-    delete object->lifetime;
-    delete object->session;
-    delete object->session_id;
+    delete object->m_Lifetime;
+    delete object->m_Session;
+    delete object->m_SessionId;
 }
 
-static void p2p_config_connect(P2PConfig *object, t_symbol *url, t_symbol *room,
-                               t_symbol *username) {
-    if (object->session && *object->session && object->controls_session) {
-        (*object->session)->connect(url->s_name, room->s_name, username->s_name);
-    }
-}
-
-static void p2p_config_disconnect(P2PConfig *object) {
-    if (object->session && *object->session && object->controls_session) {
-        (*object->session)->disconnect();
+// ─────────────────────────────────────
+static void P2PConfigConnect(P2PConfig *object, t_symbol *url, t_symbol *room, t_symbol *username) {
+    if (object->m_Session && *object->m_Session && object->m_ControlsSession) {
+        (*object->m_Session)->Connect(url->s_name, room->s_name, username->s_name);
     }
 }
 
-static void p2p_config_stream(P2PConfig *object, double value) {
-    if (object->session && *object->session && object->controls_session) {
-        (*object->session)->setStreaming(value != 0);
+// ─────────────────────────────────────
+static void P2PConfigDisconnect(P2PConfig *object) {
+    if (object->m_Session && *object->m_Session && object->m_ControlsSession) {
+        (*object->m_Session)->Disconnect();
     }
 }
 
-static std::string p2p_config_atoms_to_text(long argc, t_atom *argv) {
+// ─────────────────────────────────────
+static void P2PConfigStream(P2PConfig *object, double value) {
+    if (object->m_Session && *object->m_Session && object->m_ControlsSession) {
+        (*object->m_Session)->SetStreaming(value != 0);
+    }
+}
+
+// ─────────────────────────────────────
+static std::string P2PConfigAtomsToText(long argc, t_atom *argv) {
     std::string text;
     for (long index = 0; index < argc; ++index) {
         if (index) {
@@ -173,49 +179,49 @@ static std::string p2p_config_atoms_to_text(long argc, t_atom *argv) {
     return text;
 }
 
-static void p2p_config_message(P2PConfig *object, t_symbol *, long argc, t_atom *argv) {
-    if (object->session && *object->session && object->controls_session) {
-        (*object->session)->sendMessage(p2p_config_atoms_to_text(argc, argv));
+// ─────────────────────────────────────
+static void P2PConfigMessage(P2PConfig *object, t_symbol *, long argc, t_atom *argv) {
+    if (object->m_Session && *object->m_Session && object->m_ControlsSession) {
+        (*object->m_Session)->SendMessage(P2PConfigAtomsToText(argc, argv));
     }
 }
 
-static void p2p_config_json(P2PConfig *object, t_symbol *, long argc, t_atom *argv) {
-    if (!object->session || !*object->session || !object->controls_session || argc < 1) {
+// ─────────────────────────────────────
+static void P2PConfigJson(P2PConfig *object, t_symbol *, long argc, t_atom *argv) {
+    if (!object->m_Session || !*object->m_Session || !object->m_ControlsSession || argc < 1) {
         if (argc < 1) {
             object_error((t_object *)object, "[p2p.config] json message is empty");
         }
         return;
     }
-    (*object->session)->sendJson(p2p_config_atoms_to_text(argc, argv));
+    (*object->m_Session)->SendJson(P2PConfigAtomsToText(argc, argv));
 }
 
-static void p2p_config_report(P2PConfig *object) {
-    if (object->session && *object->session && object->controls_session) {
-        (*object->session)->report();
+// ─────────────────────────────────────
+static void P2PConfigReport(P2PConfig *object) {
+    if (object->m_Session && *object->m_Session && object->m_ControlsSession) {
+        (*object->m_Session)->Report();
     }
 }
 
-void p2p_config_setup() {
-    p2p_config_class =
-        class_new("p2p.config", reinterpret_cast<method>(p2p_config_new),
-                  reinterpret_cast<method>(p2p_config_free), sizeof(P2PConfig), nullptr,
-                  A_GIMME, 0);
-    class_addmethod(p2p_config_class, reinterpret_cast<method>(p2p_config_connect),
-                    "connect", A_SYM, A_SYM, A_SYM, 0);
-    class_addmethod(p2p_config_class, reinterpret_cast<method>(p2p_config_disconnect),
-                    "disconnect", 0);
-    class_addmethod(p2p_config_class, reinterpret_cast<method>(p2p_config_stream),
-                    "stream", A_FLOAT, 0);
-    class_addmethod(p2p_config_class, reinterpret_cast<method>(p2p_config_report),
-                    "report", 0);
-    class_addmethod(p2p_config_class, reinterpret_cast<method>(p2p_config_message),
-                    "message", A_GIMME, 0);
-    class_addmethod(p2p_config_class, reinterpret_cast<method>(p2p_config_json), "json",
-                    A_GIMME, 0);
-    class_register(CLASS_BOX, p2p_config_class);
+// ─────────────────────────────────────
+void P2PConfigSetup() {
+    t_class *host_class =
+        class_new("p2p.config", reinterpret_cast<method>(P2PConfigNew),
+                  reinterpret_cast<method>(P2PConfigFree), sizeof(P2PConfig), nullptr, A_GIMME, 0);
+    class_addmethod(host_class, reinterpret_cast<method>(P2PConfigConnect), "connect", A_SYM, A_SYM,
+                    A_SYM, 0);
+    class_addmethod(host_class, reinterpret_cast<method>(P2PConfigDisconnect), "disconnect", 0);
+    class_addmethod(host_class, reinterpret_cast<method>(P2PConfigStream), "stream", A_FLOAT, 0);
+    class_addmethod(host_class, reinterpret_cast<method>(P2PConfigReport), "report", 0);
+    class_addmethod(host_class, reinterpret_cast<method>(P2PConfigMessage), "message", A_GIMME, 0);
+    class_addmethod(host_class, reinterpret_cast<method>(P2PConfigJson), "json", A_GIMME, 0);
+    class_register(CLASS_BOX, host_class);
+    P2PConfig::GetClass() = host_class;
 }
 
+// ─────────────────────────────────────
 extern "C" C74_EXPORT void ext_main(void *) {
-    P2PMainThreadDispatch::initialize();
-    p2p_config_setup();
+    P2PMainThreadDispatch::Initialize();
+    P2PConfigSetup();
 }
