@@ -1,8 +1,18 @@
 class SimpleP2P {
-    constructor(room, name, serverUrl = "wss://p2p-signaling.charlesneimog.workers.dev") {
+    constructor(room, name, options = {}) {
+        // Preserve the legacy third-argument signaling URL.
+        if (typeof options === "string") options = { serverUrl: options };
+        this.topology = options.topology ?? "mesh";
+        this.role = options.role ?? null;
+        if (!["mesh", "star"].includes(this.topology)) {
+            throw new Error(`Invalid topology: ${this.topology}`);
+        }
+        if (this.topology === "star" && !["host", "client"].includes(this.role)) {
+            throw new Error("Star topology requires role: host or client");
+        }
         this.room = room;
         this.name = name;
-        this.serverUrl = serverUrl;
+        this.serverUrl = options.serverUrl ?? "wss://p2p-signaling.charlesneimog.workers.dev";
         this.myId = null;
         this.ws = null;
         this.connectReady = Promise.resolve();
@@ -34,7 +44,7 @@ class SimpleP2P {
 
         this.ws.onopen = () => {
             this.onLog("WebSocket connected");
-            this.ws.send(JSON.stringify({ type: "join", name: this.name }));
+            this.ws.send(JSON.stringify({ type: "join", name: this.name, topology: this.topology, role: this.role }));
         };
 
         this.ws.onmessage = async (event) => {
@@ -50,13 +60,13 @@ class SimpleP2P {
                 case "existing-peers":
                     await this.connectReady;
                     for (const peer of msg.peers) {
-                        await this._ensurePeer(peer.id, peer.name);
+                        if (this._shouldConnectTo(peer)) await this._ensurePeer(peer.id, peer.name);
                     }
                     break;
 
                 case "peer-joined":
                     await this.connectReady;
-                    await this._ensurePeer(msg.from, msg.peer.name);
+                    if (this._shouldConnectTo(msg.peer)) await this._ensurePeer(msg.from, msg.peer.name);
                     this.onPeerJoin(msg.from, msg.peer.name);
                     break;
 
@@ -75,6 +85,10 @@ class SimpleP2P {
 
                 case "peer-left":
                     this._removePeer(msg.from);
+                    break;
+
+                case "error":
+                    this.onError(new Error(msg.message));
                     break;
             }
         };
@@ -195,6 +209,15 @@ class SimpleP2P {
     }
 
     // ─────────────────────────────────────
+    _shouldConnectTo(peer) {
+        const topology = peer.topology ?? "mesh";
+        if (topology !== this.topology || peer.id === this.myId) return false;
+        if (topology === "mesh") return true;
+        return (this.role === "host" && peer.role === "client") ||
+            (this.role === "client" && peer.role === "host");
+    }
+
+    // ─────────────────────────────────────
     async _ensurePeer(peerId, peerName = "Unknown") {
         if (this.peers.has(peerId)) return this.peers.get(peerId);
 
@@ -217,7 +240,7 @@ class SimpleP2P {
     }
 
     // ─────────────────────────────────────
-    // Single source of truth for topology and politeness
+    // Politeness is independent of topology and media direction.
     _determinePoliteness(myId, remoteId) {
         return myId > remoteId;
     }

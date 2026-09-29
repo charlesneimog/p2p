@@ -157,6 +157,20 @@ static void P2PConfigConnect(P2PConfig *object, t_symbol *url, t_symbol *room, t
 }
 
 // ─────────────────────────────────────
+static void P2PConfigTopology(P2PConfig *object, t_symbol *topology) {
+    if (object->m_Session && *object->m_Session && object->m_ControlsSession) {
+        (*object->m_Session)->SetTopology(topology->s_name);
+    }
+}
+
+// ─────────────────────────────────────
+static void P2PConfigRole(P2PConfig *object, t_symbol *role) {
+    if (object->m_Session && *object->m_Session && object->m_ControlsSession) {
+        (*object->m_Session)->SetRole(role->s_name);
+    }
+}
+
+// ─────────────────────────────────────
 static void P2PConfigDisconnect(P2PConfig *object) {
     if (object->m_Session && *object->m_Session && object->m_ControlsSession) {
         (*object->m_Session)->Disconnect();
@@ -228,5 +242,7 @@ extern "C" void setup_p2p0x2econfig() {
                     A_GIMME, 0);
     class_addmethod(host_class, reinterpret_cast<t_method>(P2PConfigJson), gensym("json"), A_GIMME,
                     0);
+    class_addmethod(host_class, reinterpret_cast<t_method>(P2PConfigTopology), gensym("topology"), A_SYMBOL, 0);
+    class_addmethod(host_class, reinterpret_cast<t_method>(P2PConfigRole), gensym("role"), A_SYMBOL, 0);
     P2PConfig::GetClass() = host_class;
 }

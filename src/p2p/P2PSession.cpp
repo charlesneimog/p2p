@@ -380,6 +380,10 @@ void P2PSession::Connect(const std::string &websocket_url, const std::string &ro
     std::shared_ptr<rtc::WebSocket> websocket;
     {
         std::lock_guard<std::mutex> lock(m_WebsocketMutex);
+        if (m_Topology == "star" && m_Role.empty()) {
+            Error("Star topology requires role host or client before connect");
+            return;
+        }
         if (!m_Websocket) {
             const CaBundleResolution ca_bundle = ResolveCaBundle();
             if (!ca_bundle.m_Error.empty()) {
@@ -429,14 +433,19 @@ void P2PSession::InstallWebSocketCallbacks() {
         std::shared_ptr<rtc::WebSocket> socket;
         std::string username;
         std::string room;
+        std::string topology;
+        std::string role;
         {
             std::lock_guard<std::mutex> lock(session->m_WebsocketMutex);
             socket = session->m_Websocket;
             username = session->m_LocalUsername;
             room = session->m_Room;
+            topology = session->m_Topology;
+            role = session->m_Role;
         }
         if (socket) {
-            Json join = {{"type", "join"}, {"name", username}};
+            Json join = {{"type", "join"}, {"name", username}, {"topology", topology},
+                         {"role", topology == "star" ? Json(role) : Json(nullptr)}};
             socket->send(join.dump());
         }
         session->m_WebsocketConnected = true;
@@ -514,6 +523,8 @@ void P2PSession::OnSignallingMessage(const std::string &payload) {
             Answer(data);
         } else if (type == "peer-left") {
             PeerLeft(data);
+        } else if (type == "error") {
+            Error("%s", data.value("message", "Signalling error").c_str());
         } else {
             Error("%s", payload.c_str());
         }
@@ -550,6 +561,36 @@ void P2PSession::Disconnect() {
 // ╭─────────────────────────────────────╮
 // │    Streaming and Receiver Claims    │
 // ╰─────────────────────────────────────╯
+void P2PSession::SetTopology(const std::string &topology) {
+    if (topology != "mesh" && topology != "star") {
+        Error("Invalid topology '%s': expected mesh or star", topology.c_str());
+        return;
+    }
+    bool active;
+    {
+        std::lock_guard<std::mutex> lock(m_WebsocketMutex);
+        active = static_cast<bool>(m_Websocket);
+        if (!active) m_Topology = topology;
+    }
+    if (active) Error("Disconnect before changing topology");
+}
+
+// ─────────────────────────────────────
+void P2PSession::SetRole(const std::string &role) {
+    if (role != "host" && role != "client") {
+        Error("Invalid role '%s': expected host or client", role.c_str());
+        return;
+    }
+    bool active;
+    {
+        std::lock_guard<std::mutex> lock(m_WebsocketMutex);
+        active = static_cast<bool>(m_Websocket);
+        if (!active) m_Role = role;
+    }
+    if (active) Error("Disconnect before changing role");
+}
+
+// ─────────────────────────────────────
 void P2PSession::SetStreaming(bool enabled) {
     if (m_WantsStream.exchange(enabled) != enabled) {
         Log(P2PLogLevel::Normal, "Stream %s", enabled ? "active" : "paused");
@@ -766,10 +807,6 @@ std::shared_ptr<P2PPeer> P2PSession::AddPeer(const std::string &peer_id,
         if (existing != m_PeersById.end()) {
             return existing->second;
         }
-        if (m_PeersById.size() >= 8) {
-            Error("No free nodes available for peer %s", peer_id.c_str());
-            return {};
-        }
         peer = std::make_shared<P2PPeer>(peer_id, username);
         if (!peer->InitializeEncoder(m_SampleRate)) {
             Error("Opus encoder error for peer '%s'", username.c_str());
@@ -869,7 +906,20 @@ void P2PSession::RebuildRealtimePeersLocked() {
 }
 
 // ─────────────────────────────────────
+bool P2PSession::ShouldConnectTo(const Json &peer) const {
+    std::lock_guard<std::mutex> lock(m_WebsocketMutex);
+    const std::string topology = peer.value("topology", "mesh");
+    if (topology != m_Topology) return false;
+    if (peer.contains("id") && peer["id"] == m_LocalPeerId) return false;
+    if (topology == "mesh") return true;
+    const Json role = peer.value("role", Json(nullptr));
+    return (m_Role == "host" && role == "client") ||
+           (m_Role == "client" && role == "host");
+}
+
+// ─────────────────────────────────────
 void P2PSession::PeerJoined(const Json &data) {
+    if (!ShouldConnectTo(data.value("peer", Json::object()))) return;
     const std::string from_peer = data.contains("from") ? data["from"].get<std::string>() : "";
     const std::string peer_name = data.contains("peer") && data["peer"].contains("name")
                                       ? data["peer"]["name"].get<std::string>()
@@ -891,6 +941,7 @@ void P2PSession::PeerJoined(const Json &data) {
 // ─────────────────────────────────────
 void P2PSession::ExistingPeers(const Json &data) {
     for (const auto &description : data["peers"]) {
+        if (!ShouldConnectTo(description)) continue;
         const std::string peer_id = description["id"].get<std::string>();
         const std::string peer_name = description["name"].get<std::string>();
         std::shared_ptr<P2PPeer> peer = AddPeer(peer_id, peer_name);
@@ -917,6 +968,8 @@ void P2PSession::Offer(const Json &data) {
     const std::string from_peer = data.contains("from") ? data["from"].get<std::string>() : "";
     std::shared_ptr<P2PPeer> peer = FindPeerById(from_peer);
     if (!peer) {
+        // Preserve legacy mesh offers, but star peers require room metadata first.
+        if (!ShouldConnectTo(Json::object())) return;
         peer = AddPeer(from_peer, from_peer);
         if (!peer) {
             return;

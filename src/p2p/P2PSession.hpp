@@ -63,6 +63,8 @@ public:
     void Connect(const std::string &websocket_url, const std::string &room,
                  const std::string &local_username);
     void Disconnect();
+    void SetTopology(const std::string &topology);
+    void SetRole(const std::string &role);
     void SetStreaming(bool enabled);
     bool Streaming() const;
     // Avoid the Windows SDK's SendMessage macro, also included by the Max SDK.
@@ -103,6 +105,7 @@ private:
     void Answer(const nlohmann::json &data);
     void IceCandidate(const nlohmann::json &data);
     void PeerLeft(const nlohmann::json &data);
+    bool ShouldConnectTo(const nlohmann::json &peer) const;
 
     std::shared_ptr<P2PPeer> AddPeer(const std::string &peer_id, const std::string &username);
     std::shared_ptr<P2PPeer> FindPeerById(const std::string &peer_id) const;
@@ -141,6 +144,8 @@ private:
     std::string m_LocalPeerId;
     std::string m_Room;
     std::string m_LocalUsername;
+    std::string m_Topology{"mesh"};
+    std::string m_Role;
 
     mutable std::mutex m_PeersMutex;
     std::unordered_map<std::string, std::shared_ptr<P2PPeer>> m_PeersById;

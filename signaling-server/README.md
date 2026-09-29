@@ -59,9 +59,22 @@ npx wrangler deploy
 After deployment, the terminal will display the production URL (for example, `https://p2p-signaling.<your-username>.workers.dev`).
 Use the `wss://` version of this URL in your frontend client.
 
-## File Structure
+## Room protocol
+
+Clients send `{ "type": "join", "name": "name", "topology": "star", "role": "host" }`
+or use `"role": "client"`. Omitting topology selects `mesh` for legacy clients.
+`existing-peers` entries and the `peer` object in `peer-joined` include `id`,
+`name`, `topology`, and `role` (`null` in mesh).
+
+Only accepted joins are advertised. Rooms reject mixed topologies, invalid
+star roles, and second hosts with an `error` message containing `message`,
+then close the rejected socket with code 1008. Membership is fixed for the
+socket lifetime. Signaling is relayed only between joined peers and, in star,
+only between host and client. Clients remain in the room after the host leaves;
+a replacement host may join. Topology resets when the last joined peer leaves.
+
+## Source files
 
 * `index.js`: Worker entry point; handles routing and room name extraction.
 * `room.js`: Durable Object logic; responsible for maintaining active WebSocket connections and broadcasting SDP (Session Description Protocol) and ICE candidates.
 * `wrangler.toml`: Cloudflare configuration and infrastructure provisioning file.
-
