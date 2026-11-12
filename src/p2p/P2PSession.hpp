@@ -131,7 +131,7 @@ private:
     const std::string m_Id;
     const int m_SampleRate;
     const MainThreadDispatcher m_MainThreadDispatcher;
-    const int m_FrameSize{120}; // Minimum Opus frame: 2.5 ms at 48 kHz.
+    const int m_FrameSize{480}; // Minimum Opus frame: 2.5 ms at 48 kHz.
     std::atomic<bool> m_Available{true};
     std::atomic<bool> m_WebsocketConnected{false};
     std::atomic<bool> m_WantsStream{false};

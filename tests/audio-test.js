@@ -223,7 +223,11 @@ connectBtn.onclick = async () => {
 
     setStatus("Connecting...");
     connectBtn.disabled = true;
-    network = new SimpleP2P(room, name);
+    network = new SimpleP2P(room, name, {
+        audio: {
+            receiveStereo: document.body.dataset.audioReceiveStereo === "true",
+        },
+    });
 
     network.onLog = (message) => addLog(message);
     network.onError = (error) => {

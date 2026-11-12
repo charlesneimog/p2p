@@ -82,6 +82,34 @@ test("legacy constructor and metadata-free joins remain mesh", async () => {
     assert.equal(legacy.topology, "mesh");
 });
 
+test("stereo receivers advertise Opus stereo without claiming to send it", () => {
+    const { SimpleP2P } = harness();
+    const client = new SimpleP2P("room", "name", { audio: { receiveStereo: true } });
+    const description = client._withOpusChannelPreferences({
+        type: "offer",
+        sdp: [
+            "v=0",
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+            "a=rtpmap:111 opus/48000/2",
+            "a=fmtp:111 minptime=10;stereo=0;sprop-stereo=1",
+            "",
+        ].join("\r\n"),
+    });
+
+    assert.match(description.sdp, /a=fmtp:111 minptime=10;stereo=1;sprop-stereo=0\r\n/);
+});
+
+test("mono receivers leave Opus channel parameters unchanged", () => {
+    const { SimpleP2P } = harness();
+    const client = new SimpleP2P("room", "name");
+    const description = {
+        type: "answer",
+        sdp: "v=0\r\na=rtpmap:109 opus/48000/2\r\n",
+    };
+
+    assert.equal(client._withOpusChannelPreferences(description), description);
+});
+
 test("clients wait for a host, form 19 links, and reconnect to a replacement host", async () => {
     const h = harness();
     const clients = Array.from({ length: 19 }, () => h.join({ topology: "star", role: "client" }));

@@ -13,6 +13,7 @@ class SimpleP2P {
         this.room = room;
         this.name = name;
         this.serverUrl = options.serverUrl ?? "wss://p2p-signaling.charlesneimog.workers.dev";
+        this.receiveStereoAudio = options.audio?.receiveStereo === true;
         this.myId = null;
         this.ws = null;
         this.connectReady = Promise.resolve();
@@ -198,6 +199,55 @@ class SimpleP2P {
     _directionReceives(direction) {
         return direction === SimpleP2P.Direction.RecvOnly || direction === SimpleP2P.Direction.SendRecv;
     }
+
+    // ─────────────────────────────────────
+    _withOpusChannelPreferences(description) {
+        const originalSdp = description?.sdp;
+        if (!this.receiveStereoAudio || !originalSdp) return description;
+
+        const opusPayloadTypes = [
+            ...originalSdp.matchAll(/^a=rtpmap:(\d+)[ \t]+opus\/48000\/2[ \t]*(?=\r?$)/gim),
+        ].map((match) => match[1]);
+        if (!opusPayloadTypes.length) return description;
+
+        const eol = originalSdp.includes("\r\n") ? "\r\n" : "\n";
+        let sdp = originalSdp;
+
+        for (const payloadType of opusPayloadTypes) {
+            const fmtpPattern = new RegExp(`^a=fmtp:${payloadType}\\s+([^\\r\\n]*)`, "im");
+            const channelParameters = (value) => {
+                const parameters = value
+                    .split(";")
+                    .map((parameter) => parameter.trim())
+                    .filter(Boolean)
+                    .filter((parameter) => !/^(?:stereo|sprop-stereo)\s*=/i.test(parameter));
+
+                // stereo is the receiver capability; sprop-stereo describes the
+                // sender, which remains disabled on this receive-only test page.
+                parameters.push("stereo=1", "sprop-stereo=0");
+                return parameters.join(";");
+            };
+
+            if (fmtpPattern.test(sdp)) {
+                sdp = sdp.replace(
+                    fmtpPattern,
+                    (_line, parameters) => `a=fmtp:${payloadType} ${channelParameters(parameters)}`,
+                );
+                continue;
+            }
+
+            const rtpmapPattern = new RegExp(
+                `^a=rtpmap:${payloadType}[ \\t]+opus\\/48000\\/2[ \\t]*(?=\\r?$)`,
+                "im",
+            );
+            sdp = sdp.replace(
+                rtpmapPattern,
+                (line) => `${line}${eol}a=fmtp:${payloadType} stereo=1;sprop-stereo=0`,
+            );
+        }
+
+        return { type: description.type, sdp };
+    }
     // ─────────────────────────────────────
     broadcast(data) {
         const payload = JSON.stringify(data);
@@ -307,7 +357,8 @@ class SimpleP2P {
             try {
                 peer.makingOffer = true;
 
-                await pc.setLocalDescription();
+                const offer = this._withOpusChannelPreferences(await pc.createOffer());
+                await pc.setLocalDescription(offer);
 
                 this.ws.send(
                     JSON.stringify({
@@ -353,7 +404,8 @@ class SimpleP2P {
             await this._configureMediaAnswer(pc, description, "video");
 
             await this._flushPendingCandidates(peer);
-            await pc.setLocalDescription();
+            const answer = this._withOpusChannelPreferences(await pc.createAnswer());
+            await pc.setLocalDescription(answer);
             this.ws.send(
                 JSON.stringify({
                     type: "answer",

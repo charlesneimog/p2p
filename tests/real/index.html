@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#ffffff" />
+        <title>P2P - University of São Paulo</title>
+        <style>
+            :root {
+                color-scheme: light;
+                font-family:
+                    Inter,
+                    system-ui,
+                    -apple-system,
+                    BlinkMacSystemFont,
+                    "Segoe UI",
+                    sans-serif;
+                color: #171717;
+                background: #fff;
+                --border: #dedede;
+                --muted: #686868;
+                --success: #237a51;
+                --error: #b43932;
+            }
+            * {
+                box-sizing: border-box;
+            }
+            body {
+                margin: 0;
+                min-height: 100vh;
+            }
+            button,
+            input {
+                font: inherit;
+            }
+            button {
+                cursor: pointer;
+            }
+            button:disabled {
+                cursor: not-allowed;
+                opacity: 0.45;
+            }
+            button:focus-visible,
+            input:focus-visible {
+                outline: 2px solid #171717;
+                outline-offset: 2px;
+            }
+
+            .toolbar {
+                position: sticky;
+                top: 0;
+                z-index: 5;
+                border-bottom: 1px solid var(--border);
+                background: rgb(255 255 255 / 96%);
+                backdrop-filter: blur(12px);
+            }
+            .toolbar-top,
+            .toolbar-bottom {
+                max-width: 1600px;
+                margin: auto;
+                padding: 0.85rem clamp(1rem, 3vw, 2.5rem);
+            }
+            .toolbar-top {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 1rem;
+            }
+            h1 {
+                margin: 0;
+                font-size: 0.97rem;
+                font-weight: 700;
+                letter-spacing: -0.02em;
+            }
+            #status {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.55rem;
+                color: var(--muted);
+                font-size: 0.83rem;
+                white-space: nowrap;
+            }
+            #status::before {
+                content: "";
+                width: 0.58rem;
+                height: 0.58rem;
+                border-radius: 100%;
+                background: #a0a0a0;
+            }
+            #status[data-state="connected"] {
+                color: var(--success);
+            }
+            #status[data-state="connected"]::before {
+                background: var(--success);
+            }
+            #status[data-state="connecting"]::before,
+            #status[data-state="waiting"]::before {
+                background: #c18b24;
+            }
+            #status[data-state="error"] {
+                color: var(--error);
+            }
+            #status[data-state="error"]::before {
+                background: var(--error);
+            }
+            .toolbar-bottom {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 1.2rem;
+                border-top: 1px solid #f0f0f0;
+            }
+            #identity-form {
+                display: flex;
+                flex: 1 1 490px;
+                flex-wrap: wrap;
+                align-items: end;
+                gap: 0.65rem;
+            }
+            .field {
+                display: grid;
+                flex: 1 1 130px;
+                gap: 0.35rem;
+                min-width: 120px;
+            }
+            .field label,
+            .mic-name {
+                font-size: 0.72rem;
+                font-weight: 650;
+                color: var(--muted);
+            }
+            .field input {
+                width: 100%;
+                min-height: 2.45rem;
+                padding: 0.55rem 0.7rem;
+                border: 1px solid var(--border);
+                border-radius: 0.42rem;
+                background: #fff;
+                font-size: 0.87rem;
+            }
+            .field input:disabled {
+                background: #f6f6f6;
+            }
+            .button {
+                min-height: 2.45rem;
+                padding: 0.5rem 0.95rem;
+                border: 1px solid #171717;
+                border-radius: 0.42rem;
+                background: #171717;
+                color: white;
+                font-size: 0.84rem;
+                font-weight: 650;
+            }
+            .button.secondary {
+                border-color: var(--border);
+                background: white;
+                color: #171717;
+            }
+            .button:hover:not(:disabled) {
+                opacity: 0.82;
+            }
+            .audio {
+                display: flex;
+                align-items: center;
+                gap: 0.9rem;
+            }
+            .meter {
+                position: relative;
+                width: 0.8rem;
+                height: 3.3rem;
+                overflow: hidden;
+                border: 1px solid #c9c9c9;
+                border-radius: 0.22rem;
+                background: #eee;
+            }
+            #meter-fill {
+                position: absolute;
+                right: 0;
+                bottom: 0;
+                left: 0;
+                height: 0;
+                background: linear-gradient(to top, #30855c 0%, #30855c 70%, #d69b2b 85%, #b43932 100%);
+                transition: height 65ms linear;
+            }
+            .mic-controls {
+                display: grid;
+                gap: 0.22rem;
+            }
+            .mic-row {
+                display: flex;
+                align-items: center;
+                gap: 0.7rem;
+            }
+            #gain {
+                width: 110px;
+                accent-color: #171717;
+            }
+            #gain-value,
+            #mic-status {
+                color: var(--muted);
+                font-size: 0.74rem;
+                font-variant-numeric: tabular-nums;
+            }
+            #mic-toggle {
+                min-width: 100px;
+            }
+            .score-area {
+                max-width: 1600px;
+                margin: auto;
+                min-height: 65vh;
+                padding: clamp(1.3rem, 4vw, 4rem);
+            }
+            #score,
+            #score svg {
+                display: block;
+                width: 100%;
+                height: auto;
+            }
+            #countdown {
+                position: fixed;
+                inset: 0;
+                z-index: 10;
+                display: grid;
+                place-items: center;
+                background: rgb(255 255 255 / 90%);
+                backdrop-filter: blur(8px);
+            }
+            #countdown[hidden],
+            #countdown-value[hidden] {
+                display: none !important;
+            }
+            .countdown-card {
+                text-align: center;
+            }
+            .countdown-card p {
+                color: var(--muted);
+                font-size: 0.78rem;
+                font-weight: 650;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+            }
+            #countdown-value {
+                display: block;
+                font-size: clamp(5rem, 14vw, 9rem);
+                line-height: 0.9;
+                letter-spacing: -0.08em;
+            }
+            @media (max-width: 700px) {
+                .toolbar-top {
+                    align-items: start;
+                }
+                h1 {
+                    white-space: normal;
+                }
+                .toolbar-bottom {
+                    align-items: stretch;
+                }
+                #identity-form {
+                    flex-basis: 100%;
+                }
+                .audio {
+                    width: 100%;
+                }
+                #mic-toggle {
+                    margin-left: auto;
+                }
+                .score-area {
+                    padding: 1.2rem 0.8rem;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <header class="toolbar">
+            <div class="toolbar-top">
+                <h1>P2P v0.3.0</h1>
+                <div id="status" data-state="disconnected" role="status" aria-live="polite">Desconectado</div>
+            </div>
+            <div class="toolbar-bottom">
+                <form id="identity-form">
+                    <div class="field">
+                        <label for="room">Sala</label>
+                        <input
+                            id="room"
+                            name="room"
+                            placeholder="minha-sala"
+                            maxlength="64"
+                            required
+                            spellcheck="false"
+                            autocomplete="off"
+                        />
+                    </div>
+                    <div class="field">
+                        <label for="username">Nome de usuário</label>
+                        <input
+                            id="username"
+                            name="username"
+                            placeholder="meu-nome"
+                            maxlength="32"
+                            required
+                            spellcheck="false"
+                            autocomplete="nickname"
+                        />
+                    </div>
+                    <button class="button" id="connect" type="submit" disabled>Conectar</button>
+                </form>
+                <div class="audio" aria-label="Entrada de microfone">
+                    <div
+                        class="meter"
+                        id="mic-meter"
+                        role="meter"
+                        aria-label="Nível do microfone"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow="0"
+                    >
+                        <div id="meter-fill"></div>
+                    </div>
+                    <div class="mic-controls">
+                        <span class="mic-name">Entrada · ganho</span>
+                        <div class="mic-row">
+                            <input
+                                id="gain"
+                                type="range"
+                                min="0"
+                                max="200"
+                                value="100"
+                                step="1"
+                                aria-label="Ganho do microfone"
+                            />
+                            <output id="gain-value" for="gain">100%</output>
+                        </div>
+                        <span id="mic-status" role="status">Microfone desligado</span>
+                    </div>
+                    <button class="button secondary" id="mic-toggle" type="button">Ativar mic</button>
+                </div>
+            </div>
+        </header>
+
+        <main class="score-area"><div id="score"></div></main>
+
+        <div id="countdown" role="dialog" aria-modal="true" aria-labelledby="countdown-label" hidden>
+            <div class="countdown-card">
+                <p id="countdown-label">A performance começa em</p>
+                <strong id="countdown-value" hidden>3</strong>
+            </div>
+        </div>
+
+        <script src="./p2p.js"></script>
+        <script>
+            (() => {
+                const $ = (selector) => document.querySelector(selector);
+                const roomInput = $("#room");
+                const usernameInput = $("#username");
+                const form = $("#identity-form");
+                const connectButton = $("#connect");
+                const status = $("#status");
+                const micButton = $("#mic-toggle");
+                const micStatus = $("#mic-status");
+                const gainInput = $("#gain");
+                const gainValue = $("#gain-value");
+                const meter = $("#mic-meter");
+                const meterFill = $("#meter-fill");
+                const storagePrefix = "fragmentos.";
+                const handlers = { onConnect: null, onDisconnect: null, onMicrophoneChange: null };
+
+                let connectionState = "disconnected";
+                let inputStream = null;
+                let audioContext = null;
+                let gainNode = null;
+                let analyser = null;
+                let destination = null;
+                let frame = null;
+                let startingMicrophone = null;
+
+                // Espaços, tabs, quebras de linha e espaços invisíveis não são permitidos.
+                function noSpaces(value) {
+                    return String(value).replace(/[\s\u200B\u200C\u200D\uFEFF]/gu, "");
+                }
+
+                function readSaved(key, fallback = "") {
+                    try {
+                        return localStorage.getItem(storagePrefix + key) ?? fallback;
+                    } catch {
+                        return fallback;
+                    }
+                }
+
+                function save(key, value) {
+                    try {
+                        localStorage.setItem(storagePrefix + key, value);
+                    } catch {
+                        /* A interface continua funcionando sem armazenamento. */
+                    }
+                }
+
+                function getIdentity() {
+                    return { room: noSpaces(roomInput.value), username: noSpaces(usernameInput.value) };
+                }
+
+                function updateConnectButton() {
+                    const { room, username } = getIdentity();
+                    const active = connectionState === "connected" || connectionState === "waiting";
+                    connectButton.disabled = connectionState === "connecting" || (!active && (!room || !username));
+                }
+
+                function setConnectionState(state, message) {
+                    if (!["disconnected", "connecting", "waiting", "connected", "error"].includes(state)) return;
+                    connectionState = state;
+                    status.dataset.state = state;
+                    status.textContent =
+                        message ||
+                        {
+                            disconnected: "Desconectado",
+                            connecting: "Conectando…",
+                            waiting: "Aguardando Pd…",
+                            connected: "Conectado",
+                            error: "Falha na conexão",
+                        }[state];
+                    const joined = state === "connected" || state === "waiting";
+                    connectButton.textContent = joined ? "Desconectar" : "Conectar";
+                    roomInput.disabled = joined || state === "connecting";
+                    usernameInput.disabled = joined || state === "connecting";
+                    updateConnectButton();
+                }
+
+                for (const [input, key] of [
+                    [roomInput, "room"],
+                    [usernameInput, "username"],
+                ]) {
+                    input.value = noSpaces(readSaved(key)).slice(0, input.maxLength);
+                    input.addEventListener("input", () => {
+                        const cleaned = noSpaces(input.value);
+                        if (input.value !== cleaned) input.value = cleaned;
+                        save(key, cleaned);
+                        updateConnectButton();
+                    });
+                }
+
+                gainInput.value = readSaved("gain", "100");
+                if (!Number.isFinite(Number(gainInput.value))) gainInput.value = "100";
+                gainValue.value = `${gainInput.value}%`;
+                gainInput.addEventListener("input", () => {
+                    gainValue.value = `${gainInput.value}%`;
+                    if (gainNode) gainNode.gain.value = Number(gainInput.value) / 100;
+                    save("gain", gainInput.value);
+                });
+
+                form.addEventListener("submit", async (event) => {
+                    event.preventDefault();
+                    if (connectionState === "connecting") return;
+                    if (connectionState === "connected" || connectionState === "waiting") {
+                        if (typeof handlers.onDisconnect !== "function") {
+                            setConnectionState("error", "Desconexão não configurada em main.js");
+                            return;
+                        }
+                        setConnectionState("connecting", "Desconectando…");
+                        try {
+                            await handlers.onDisconnect();
+                        } catch (error) {
+                            setConnectionState("error", error.message || "Erro ao desconectar");
+                        }
+                        return;
+                    }
+                    const identity = getIdentity();
+                    if (!identity.room || !identity.username) return;
+                    if (typeof handlers.onConnect !== "function") {
+                        setConnectionState("error", "Conexão não configurada em main.js");
+                        return;
+                    }
+                    save("room", identity.room);
+                    save("username", identity.username);
+                    setConnectionState("connecting");
+                    try {
+                        // Só main.js pode declarar "connected" após confirmar a conexão real.
+                        await handlers.onConnect({ ...identity, audioStream: destination?.stream ?? null });
+                    } catch (error) {
+                        setConnectionState("error", error.message || "Não foi possível conectar");
+                    }
+                });
+
+                function drawMeter() {
+                    if (!analyser) return;
+                    const samples = new Float32Array(analyser.fftSize);
+                    analyser.getFloatTimeDomainData(samples);
+                    let sum = 0;
+                    for (const sample of samples) sum += sample * sample;
+                    const rms = Math.sqrt(sum / samples.length);
+                    const db = 20 * Math.log10(Math.max(rms, 1e-6));
+                    const level = Math.round(Math.max(0, Math.min(100, (db + 60) * (100 / 60))));
+                    meterFill.style.height = `${level}%`;
+                    meter.setAttribute("aria-valuenow", String(level));
+                    frame = requestAnimationFrame(drawMeter);
+                }
+
+                async function startMicrophone() {
+                    if (destination) return destination.stream;
+                    if (startingMicrophone) return startingMicrophone;
+
+                    micButton.disabled = true;
+                    startingMicrophone = (async () => {
+                        let stream = null;
+                        try {
+                            if (!navigator.mediaDevices?.getUserMedia) {
+                                throw new Error("Microfone indisponível neste navegador ou conexão HTTP.");
+                            }
+                            const supportedConstraints = navigator.mediaDevices.getSupportedConstraints?.() ?? {};
+                            const audioConstraints = {
+                                echoCancellation: false,
+                                noiseSuppression: false,
+                                autoGainControl: false,
+                                sampleRate: { ideal: 48000 },
+                                sampleSize: { ideal: 24 },
+                                channelCount: { ideal: 1 },
+                                latency: { ideal: 0 },
+                            };
+                            if (supportedConstraints.voiceIsolation) audioConstraints.voiceIsolation = false;
+
+                            stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+                            stream.getAudioTracks().forEach((track) => {
+                                track.contentHint = "music";
+                            });
+                            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                            if (!AudioContextClass) throw new Error("Web Audio não suportado.");
+                            audioContext = new AudioContextClass({
+                                sampleRate: 48000,
+                                latencyHint: "interactive",
+                            });
+                            await audioContext.resume();
+                            const source = audioContext.createMediaStreamSource(stream);
+                            gainNode = audioContext.createGain();
+                            gainNode.gain.value = Number(gainInput.value) / 100;
+                            analyser = audioContext.createAnalyser();
+                            analyser.fftSize = 1024;
+                            destination = audioContext.createMediaStreamDestination();
+                            destination.channelCount = 1;
+                            destination.channelCountMode = "explicit";
+                            source.connect(gainNode);
+                            gainNode.connect(analyser);
+                            analyser.connect(destination); // Não conectar aos alto-falantes: evita microfonia.
+                            inputStream = stream;
+                            destination.stream.getAudioTracks().forEach((track) => {
+                                track.contentHint = "music";
+                            });
+                            stream.getAudioTracks().forEach((track) => {
+                                track.addEventListener(
+                                    "ended",
+                                    () => {
+                                        stopMicrophone();
+                                        Promise.resolve(handlers.onMicrophoneChange?.(null)).catch(console.error);
+                                    },
+                                    { once: true },
+                                );
+                            });
+                            micButton.textContent = "Desativar mic";
+                            micStatus.textContent = "Microfone ativo";
+                            drawMeter();
+                            return destination.stream;
+                        } catch (error) {
+                            if (stream) stream.getTracks().forEach((track) => track.stop());
+                            if (audioContext) void audioContext.close().catch(() => {});
+                            audioContext = null;
+                            gainNode = null;
+                            analyser = null;
+                            destination = null;
+                            micStatus.textContent = error.message || "Falha no microfone";
+                            throw error;
+                        }
+                    })();
+
+                    try {
+                        return await startingMicrophone;
+                    } finally {
+                        startingMicrophone = null;
+                        micButton.disabled = false;
+                    }
+                }
+
+                function stopMicrophone() {
+                    if (frame !== null) cancelAnimationFrame(frame);
+                    frame = null;
+                    if (inputStream) inputStream.getTracks().forEach((track) => track.stop());
+                    if (audioContext) void audioContext.close().catch(() => {});
+                    inputStream = null;
+                    audioContext = null;
+                    gainNode = null;
+                    analyser = null;
+                    destination = null;
+                    meterFill.style.height = "0%";
+                    meter.setAttribute("aria-valuenow", "0");
+                    micButton.textContent = "Ativar mic";
+                    micStatus.textContent = "Microfone desligado";
+                }
+
+                micButton.addEventListener("click", async () => {
+                    micButton.disabled = true;
+                    try {
+                        if (inputStream) {
+                            stopMicrophone();
+                            await handlers.onMicrophoneChange?.(null);
+                        } else {
+                            const stream = await startMicrophone();
+                            await handlers.onMicrophoneChange?.(stream);
+                        }
+                    } catch (error) {
+                        micStatus.textContent = error.message || "Erro ao atualizar o microfone";
+                        console.error(error);
+                    } finally {
+                        micButton.disabled = false;
+                    }
+                });
+
+                window.performanceUI = {
+                    getIdentity,
+                    getAudioStream: () => destination?.stream ?? null,
+                    startMicrophone,
+                    stopMicrophone,
+                    setConnectionState,
+                    setHandlers({ onConnect, onDisconnect, onMicrophoneChange }) {
+                        handlers.onConnect = onConnect;
+                        handlers.onDisconnect = onDisconnect;
+                        handlers.onMicrophoneChange = onMicrophoneChange;
+                    },
+                };
+                setConnectionState("disconnected");
+            })();
+        </script>
+        <script src="./main.js"></script>
+    </body>
+</html>
